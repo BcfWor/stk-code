@@ -1,7 +1,10 @@
 # About this fork:
-This fork has the aim to bring as many good functions for STK-Soccer together. That is why, this fork includes code from other STK forks.
-1) The code changes here are not only done by me but also from NobWow and Bcf-World. Sometimes the owner of the changes is not clearly visuable because they are pushed online from my account.
-2) Some parts of the code are taken or inspired from other Supertuxkart-Forks, so we want to mention them here:
+This is the fork for the TierS servers, this code is also used by several servers. This fork is inspired by: https://github.com/vinder-af-karting-spil/stk-code
+The code changes here were made not only by me but also by NobWow and vinder-af-karting-spil. At times, the original author of the changes may not be clearly visible, as they were pushed online from my account.
+If you find a bug on our servers, you can open an issue.
+Some parts of the code are taken from or inspired by other SuperTuxKart forks, so we would like to acknowledge them here:
+
+* (Base code): https://github.com/vinder-af-karting-spil/stk-code
 * https://github.com/STK-TheRocker/stk-code
 * https://github.com/STK-TheRocker/stk-rocker/
 * https://github.com/Snoker101/stk-code
