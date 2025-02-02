@@ -9435,11 +9435,14 @@ unmute_error:
 		     cmd = std::regex_replace(cmd, std::regex("rks"), "randomkarts");
 
 	     }
-	     if (ServerConfig::m_soccer_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
-	     {
-		    std::string msg = "You can only use this in unranked TierS servers";
-		    sendStringToPeer(msg, peer);
-		    return; 
+	     if (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
+	     { 
+		     if (ServerConfig::m_soccer_log)
+		     {
+		   	 std::string msg = "You can only use this in unranked TierS servers";
+		    	 sendStringToPeer(msg, peer);
+		   	 return; 
+		     }
 	     }
 	     if (argv.size() < 2 || (argv[1] != "on" && argv[1] != "off"))
 	     {
