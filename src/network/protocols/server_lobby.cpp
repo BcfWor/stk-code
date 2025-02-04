@@ -9362,7 +9362,7 @@ unmute_error:
 
         if (argv.size() == 1)
         {
-            std::string msg = "https://www.tierchester.eu";
+            std::string msg = "https://www.tiersservers.eu";
             sendStringToPeer(msg, peer);
         } 
         return;
@@ -9374,7 +9374,7 @@ unmute_error:
 
 	if (argv.size() == 1)
 	{
-		std::string msg = "https://discord.gg/TH3N5NaUR4";
+		std::string msg = "https://discord.gg/QtwG6RxXrN";
 		sendStringToPeer(msg, peer);
 	}
 	return;
@@ -9539,6 +9539,10 @@ unmute_error:
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
+	    std::string msg = "Autoteams is bugged, we are working on it";
+	    sendStringToPeer(msg, peer);
+	    return;
+
         if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
