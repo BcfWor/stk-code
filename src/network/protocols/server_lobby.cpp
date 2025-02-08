@@ -9539,10 +9539,6 @@ unmute_error:
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
-	    std::string autoteams_message = "Autoteams is bugged, we are working on it";
-	    sendStringToPeer(autoteams_message, peer);
-	    return;
-
         if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
