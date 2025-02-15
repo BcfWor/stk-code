@@ -466,17 +466,6 @@ namespace ServerConfig
         "Amount of nitro that is received with /nitro command. Full nitro bar"
         " is 20.0 units."));
 
-    SERVER_CFG_PREFIX StringServerConfigParam m_must_have_tracks
-        SERVER_CFG_DEFAULT(StringServerConfigParam("",
-        "must-have-tracks",
-        "The tracks you must have."));
-
-    SERVER_CFG_PREFIX StringServerConfigParam m_only_played_tracks
-        SERVER_CFG_DEFAULT(StringServerConfigParam("",
-        "only-played-tracks",
-        "The only tracks that are played."));
-
-
     SERVER_CFG_PREFIX BoolServerConfigParam m_server_configurable
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "server-configurable",
         "If true, the server owner can config the difficulty and game mode in "

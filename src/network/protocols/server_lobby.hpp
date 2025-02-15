@@ -513,8 +513,6 @@ public:
     std::set<std::string> m_trusted_players;
     std::set<std::string> m_red_team;
     std::set<std::string> m_blue_team;
-    std::set<std::string> m_must_have_tracks;
-    std::set<std::string> m_only_played_tracks;
     std::vector<std::vector<std::string>>
                           m_tournament_fields_per_game;
     bool serverAndPeerHaveTrack(std::shared_ptr<STKPeer>& peer, std::string track_id) const;
@@ -607,12 +605,13 @@ public:
     bool m_allow_powerupper = false;
     bool m_show_elo = false;
     bool m_show_rank = false;
+    std::pair<unsigned int, int> getSoccerRanking(std::string username) const;
+    std::pair<unsigned int, int> getPlayerRanking(std::string username) const;
     int getMaxPlayers() const                                           { return m_max_players; }
     int getMaxPlayersInGame() const                                     { return m_max_players_in_game; }
     void setMaxPlayersInGame(int value, bool notify = true);
     std::string get_elo_change_string();
     std::string getPlayerAlt(std::string username) const;
-    std::pair<unsigned int, int> getPlayerRanking(std::string username) const;
     std::pair<std::vector<std::string>, std::vector<std::string>> createBalancedTeams(std::vector<std::pair<std::string, int>>& elo_players);
     void soccer_ranked_make_teams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec);
 

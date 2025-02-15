@@ -176,6 +176,28 @@ std::string ServerLobby::exec_python_script()
 }
 
 int ServerLobby::m_fixed_laps = -1;
+//=========================================================================
+std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username) const
+{
+    std::ifstream file("/home/supertuxkart/elo_bcf/soccer_ranking.txt");
+    std::string line, name;
+    int rank = 1;
+    int rating;
+    while (std::getline(file, line))
+    {
+        std::istringstream iss(line);
+        iss >> name;
+        std::string word;
+        while (iss >> word) {
+            rating = std::stoi(word);
+        }
+        if (name == username)
+            return std::make_pair(rank, rating);
+        rank++;
+    }
+    return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
+}
+
 // ========================================================================
 class SubmitRankingRequest : public Online::XMLRequest
 {
@@ -370,16 +392,6 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_allow_powerupper = ServerConfig::m_allow_powerupper;
     m_show_elo = ServerConfig::m_show_elo;
     m_show_rank = ServerConfig::m_show_rank;
-    std::vector<std::string> mht = StringUtils::split(ServerConfig::m_must_have_tracks, ' ');
-    for (auto track : mht)
-    {
-        if (track!="") m_must_have_tracks.insert(track);
-    }
-    std::vector<std::string> opt = StringUtils::split(ServerConfig::m_only_played_tracks, ' ');
-    for (auto track : opt)
-    {
-        if (track!="") m_only_played_tracks.insert(track);
-    }
     m_last_wanrefresh_cmd_time = 0UL;
     m_last_wanrefresh_res = nullptr;
     m_last_wanrefresh_requester.reset();
@@ -3198,24 +3210,6 @@ void ServerLobby::startSelection(const Event *event)
                 msg += m_set_field;
                 sendStringToPeer(msg, peer);
 	    }
-	    if (m_must_have_tracks.size() !=0)
-	    {
-                const auto& kt = peer->getClientAssets();
-		std::string real_track;
-                std::string msg = "You need to install the following addons to play:\n";
-                for (auto track : m_must_have_tracks)
-                {
-	            real_track = "addon_" + track;
-                    if (kt.second.find(real_track) == kt.second.end())
-                    {
-                        msg += "/installaddon ";
-                        msg += track;
-                        msg += "\n";
-	                sendStringToPeer(msg, peer);
-	            }
-	        }
-            }
-            return;
         }
         if (ServerConfig::m_supertournament)
         {
@@ -3446,24 +3440,6 @@ void ServerLobby::startSelection(const Event *event)
     {
         m_available_kts.second.erase(track_erase);
     }
-
-    if (m_only_played_tracks.size()!=0)
-    {
-        auto tracks = m_available_kts.second;
-	bool found;
-	std::string real_track;
-	for (auto track: tracks)
-	{
-	    found = false;
-	    for (auto t2:m_only_played_tracks)
-	    {
-	        real_track = "addon_" + t2;
-	        if (track==real_track) found = true;
-	    }
-	    if (not found) m_available_kts.second.erase(track);
-	}
-    }
-
     max_player = 0;
     STKHost::get()->updatePlayers(&max_player);
     if (auto ai = m_ai_peer.lock())
@@ -3966,6 +3942,30 @@ void ServerLobby::checkRaceFinished()
     }
     RaceManager::get()->setItemlessMode(false);
     RaceManager::get()->setNitrolessMode(false);
+
+
+    // Ranking script & TODO: Delete debug lines
+    if (ServerConfig::m_soccer_log)
+    {
+	    FILE* pipe = popen("python3 /home/supertuxkart/elo_bcf/bcf.py", "r");
+	    if (!pipe)
+	    {
+		    Log::info("ServerLobby", "Failed to start Python script");
+		    return;
+	    }
+	    char buffer[4096];
+	    while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
+	    {
+		    size_t len = strlen(buffer);
+		    if (len > 0 && buffer[len-1] == '\n')
+		    {
+			    buffer[len-1] = '\0';
+		    }
+		    Log::info("ServerLobby", "Python script output: %s", buffer);
+	    }
+	    pclose(pipe);
+    }
+
 }   // checkRaceFinished
 
 //-----------------------------------------------------------------------------
@@ -5223,22 +5223,20 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
             profile_name = StringUtils::utf32ToWide({ 0x231B }) + profile_name;
 
         // Show the Player Elo in case the server have enabled it
-        std::pair<unsigned int, int> elorank;
-        if (m_show_elo || m_show_rank)
-            elorank = getPlayerRanking(user_name);
-        if (m_show_elo)
-            profile_name = profile_name + L" [" + std::to_wstring(elorank.second).c_str() + L"]";
-        if (m_show_rank)
-        {
-            core::stringw rankstr(L"#");
-
-            if (elorank.first == std::numeric_limits<unsigned int>::max())
-                rankstr.append(L"?");
-            else
-                rankstr.append(irr::core::stringw(elorank.first));
-            profile_name = rankstr + L" " + profile_name;
-        }
-
+	std::pair<unsigned int, int> elorank;
+	if (m_show_elo || m_show_rank)
+		elorank = getSoccerRanking(user_name);
+	if (m_show_elo)
+		profile_name = profile_name + L" [" + std::to_wstring(elorank.second).c_str() + L"]";
+	if (m_show_rank)
+	{
+		core::stringw rankstr(L"#");
+		if (elorank.first == std::numeric_limits<unsigned int>::max())
+			rankstr.append(L"?");
+		else
+			rankstr.append(irr::core::stringw(elorank.first));
+		profile_name = rankstr + L" " + profile_name;
+	}
         // Display the team in case of tournament
         if (ServerConfig::m_supertournament)
         {
@@ -9780,7 +9778,7 @@ unmute_error:
                 StringUtils::utf8ToWide(argv[3])
                 );
         uint32_t _rv = std::get<0>(target_rv_k);
-        std::string _k = std::get<1>(target_rv_k);
+	std::string _k = std::get<1>(target_rv_k);
 
         if ((player->getPermissionLevel() < target_permlvl) &&
                 ServerConfig::m_server_owner > 0 &&
@@ -10812,18 +10810,6 @@ bool ServerLobby::canRace(STKPeer* peer) const
           }
       }
       if (has_addon == false) return false;
-    }
-    if (m_must_have_tracks.size()!=0)
-    {
-	std::string real_track;
-        for (auto track : m_must_have_tracks)
-        {
-	    real_track = "addon_" + track;
-            if (kt.second.find(real_track) == kt.second.end())
-            {
-                return false;
-	    }
-        }
     }
     //if (ServerConfig::m_supertournament)
     //{
