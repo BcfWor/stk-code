@@ -15,16 +15,14 @@ void GlobalLog::openLog(GlobalLogTypes log_name)
     if (log_name == GlobalLogTypes::POS_LOG)
     {
         if (GlobalLog::outfile_posLog.is_open()) return;
-        else GlobalLog::outfile_posLog.open(ServerConfig::m_soccer_log_path,std::ios_base::app);
+        else GlobalLog::outfile_posLog.open(ServerConfig::m_soccer_log_path, std::ios_base::out | std::ios_base::app);
         //Log::info("!!!!","openLog succeded");
     }
-    //else if (log_name == GlobalLogTypes::GOAL_LOG)
-    //{
-    //    //Log::info("!!!!","openLog called");
-    //    if (GlobalLog::outfile_goalLog.is_open()) return;
-    //    else GlobalLog::outfile_goalLog.open(ServerConfig::m_logfile_name,std::ios_base::app);
-    //    //Log::info("!!!!","openLog succeded");
-    //}
+    else if (log_name == GlobalLogTypes::GOAL_LOG)
+    {
+	    if (GlobalLog::outfile_goalLog.is_open()) return;
+	    else GlobalLog::outfile_goalLog.open(ServerConfig::m_soccer_log_path, std::ios_base::out | std::ios_base::app);
+    }
 }
 
 void GlobalLog::writeLog(std::string text, GlobalLogTypes log_name)
@@ -35,29 +33,27 @@ void GlobalLog::writeLog(std::string text, GlobalLogTypes log_name)
         GlobalLog::outfile_posLog << text;
         GlobalLog::outfile_posLog.flush();
     }
-    //else if (log_name == GlobalLogTypes::GOAL_LOG)
-    //{
-    //    GlobalLog::outfile_goalLog << text;
-    //    GlobalLog::outfile_goalLog.flush();
-    //    if (!text.empty()) text.pop_back();
-    //    Log::info("GoalLog",text.c_str());
-    //}
+    else if (log_name == GlobalLogTypes::GOAL_LOG)
+    {
+        GlobalLog::outfile_goalLog << text;
+        GlobalLog::outfile_goalLog.flush();
+        if (!text.empty()) text.pop_back();
+    }
 }
 
 void GlobalLog::closeLog(GlobalLogTypes log_name)
 {
-    //std::string msg = "closeLog called " + (log_name == GlobalLogTypes::POS_LOG) ? "posLog" : "goalLog";
-    //Log::info("!!!!", msg.c_str());
+    std::string msg = "closeLog called " + (log_name == GlobalLogTypes::POS_LOG) ? "posLog" : "goalLog";
     if (log_name == GlobalLogTypes::POS_LOG)
     {
         if (!GlobalLog::outfile_posLog.is_open()) return;
         else GlobalLog::outfile_posLog.close();
     }
-    //else if (log_name == GlobalLogTypes::GOAL_LOG)
-    //{
-    //    if (!GlobalLog::outfile_goalLog.is_open()) return;
-    //    else GlobalLog::outfile_goalLog.close();
-    //}
+    else if (log_name == GlobalLogTypes::GOAL_LOG)
+    {
+        if (!GlobalLog::outfile_goalLog.is_open()) return;
+        else GlobalLog::outfile_goalLog.close();
+    }
 }
 
 void GlobalLog::addIngamePlayer(unsigned int world_kart_id, std::string player_name, bool offline_account)
