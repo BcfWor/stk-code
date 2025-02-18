@@ -205,6 +205,10 @@ namespace ServerConfig
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "show-rank",
         "Show the rank before the username in the lobby."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_soccer_ranking_file_bcf
+	    SERVER_CFG_DEFAULT(StringServerConfigParam("", "soccer-ranking-file",
+	    "Path to the soccer ranking file that contains player statistics and ELO ratings."));
+
     SERVER_CFG_PREFIX BoolServerConfigParam m_allow_heavyparty
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-heavyparty",
         "Allow heavy party."));
@@ -262,6 +266,15 @@ namespace ServerConfig
     
     SERVER_CFG_PREFIX StringServerConfigParam m_live_soccer_log_path
         SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_match.log", "live-soccer-log-path", "File path to the live soccer log."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_soccer_ranking_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_ranked_script_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("bcf.py", "ranked-script-path", "File path to the ranking Python script."));   
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
+	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
 
     SERVER_CFG_PREFIX BoolServerConfigParam m_wan_server
         SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "wan-server",
@@ -740,6 +753,7 @@ namespace ServerConfig
     // TierS additions: /item and /nitro commands
     // return an amount for an item got in m_cheat_items, otherwise return 0
     int getCheatQuantity(PowerupManager::PowerupType type);
+
 
 };   // namespace ServerConfig
 
