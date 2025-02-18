@@ -100,7 +100,13 @@
 #include "io/file_manager.hpp"
 #include "utils/file_utils.hpp"
 #include "utils/time.hpp"
-//=======================================================================
+
+
+
+// =======================================================================
+// Assigns random karts to all players in the lobby
+// Uses the available kart list to randomly select karts
+
 void ServerLobby::assignRandomKarts()
 {
     if (m_peers_ready.empty())
@@ -135,7 +141,10 @@ void ServerLobby::assignRandomKarts()
     std::string msg = "Random karts have been forcibly assigned to all players, to disable this state: /randomkarts off";
     sendStringToAllPeers(msg);
 }
-//-----------------------------------------------------------------------
+// ===============================================================================
+// Resets all kart selections for players in the lobby
+// Removes any forced kart assignments
+
 void ServerLobby::resetKartSelections()
 {
 	for (auto& peer : m_peers_ready)
@@ -155,7 +164,9 @@ void ServerLobby::resetKartSelections()
 	}
 }
 
-//========================================================================
+// ========================================================================
+// Executes the Python script for track records and returns its output
+
 std::string ServerLobby::exec_python_script()
 {
     std::array<char, 1024> buffer;
@@ -176,10 +187,16 @@ std::string ServerLobby::exec_python_script()
 }
 
 int ServerLobby::m_fixed_laps = -1;
-//=========================================================================
+// =========================================================================
+// Gets a player's soccer ranking and rating from the ranking file
+// Returns a pair containing:
+// - first: player's rank (or max unsigned int if not found)
+// - second: player's rating (or 0 if not found)
+// Reads through ranking file line by line to find matching username
+
 std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username) const
 {
-    std::ifstream file("/home/supertuxkart/elo_bcf/soccer_ranking.txt");
+    std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());	
     std::string line, name;
     int rank = 1;
     int rating;
@@ -1260,19 +1277,14 @@ void ServerLobby::forceChangeTeam(NetworkPlayerProfile* const player, const Kart
 
     if (peer && has_pole)
     {
-        core::stringw text = L"Your voting has been reset since your team has been changed."
-            L" Please vote again:\n";
-        // TODO:
-        NetworkString* msg = getNetworkString();
-        msg->setSynchronous(true);
-        msg->addUInt8(LE_CHAT);
-        text += formatTeammateList(
-                STKHost::get()->getPlayerProfilesOfTeam(
-                    team
-                    ));
-        msg->encodeString16(text);
-        peer->sendPacket(msg, true/*reliable*/);
-        delete msg;
+        core::stringw text = L"Your voting has been reset since your team has been changed. Please vote again:\n";
+	text += formatTeammateList(STKHost::get()->getPlayerProfilesOfTeam(team));
+	NetworkString* msg = getNetworkString();
+	msg->setSynchronous(true);
+	msg->addUInt8(LE_CHAT);
+	msg->encodeString16(text);
+	peer->sendPacket(msg, true/*reliable*/);
+	delete msg;
     }
 
     updatePlayerList();
@@ -2887,15 +2899,13 @@ void ServerLobby::update(int ticks)
         if ((m_replay_requested || RaceManager::get()->isRecordingRace())
                 && World::getWorld() && World::getWorld()->isRacePhase())	
         {
-           Log::verbose("ServerLobby", "Attempting to save replay...(custom path)");
-           m_replay_dir = "/home/supertuxkart/stk-code/data/replay/";
+           m_replay_dir = ServerConfig::m_replay_dir;
 
            ReplayRecorder::get()->save();
            std::string replay_path = file_manager->getReplayDir() + ReplayRecorder::get()->getReplayFilename();
            if (file_manager->fileExists(replay_path))
            {
                Log::info("ServerLobby", "Replay file verified at: %s", replay_path.c_str());
-               Log::info("ServerLobby", "Replay saved successfully");
                std::string msg= "The replay has been successfully recorded and properly saved!";
                sendStringToAllPeers(msg);
            }
@@ -2931,9 +2941,37 @@ void ServerLobby::update(int ticks)
                 sw->tellCountIfDiffers();
         }
         Log::info("ServerLobby", "End of game message sent");
-        if(ServerConfig::m_soccer_log) GlobalLog::writeLog("GAME_END\n", GlobalLogTypes::POS_LOG);
-        GlobalLog::closeLog(GlobalLogTypes::POS_LOG);
-        break;
+	
+	// Soccer ranking
+        if(ServerConfig::m_soccer_log)
+	{
+		GlobalLog::writeLog("GAME_END\n", GlobalLogTypes::POS_LOG);
+		GlobalLog::closeLog(GlobalLogTypes::POS_LOG);
+
+		std::thread python_thread([this]()
+				{
+					std::string command = std::string("python3 ") + ServerConfig::m_ranked_script_path.c_str();
+					FILE* pipe = popen(command.c_str(), "r");
+					if (!pipe)
+					{
+						Log::info("ServerLobby", "Failed to start python script");
+						return;
+					}
+					char buffer[4096];
+					while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
+					{
+						size_t len = strlen(buffer);
+						if (len > 0 && buffer[len-1] == '\n')
+						{
+							buffer[len-1] = '\0';
+						}
+						Log::info("ServerLobby", "Ranking script: %s", buffer);
+					}
+					pclose(pipe);
+				});
+				python_thread.detach();
+	}
+	break;
     case RESULT_DISPLAY:
         if (checkPeersReady(true/*ignore_ai_peer*/) ||
             (int64_t)StkTime::getMonoTimeMs() > m_timeout.load())
@@ -3934,6 +3972,7 @@ void ServerLobby::checkRaceFinished()
     // no powerup modifiers after each game
     RaceManager::get()->setPowerupSpecialModifier(
             Powerup::TSM_NONE);
+
     
     if (ServerConfig::m_tiers_roulette)
     {
@@ -3942,31 +3981,8 @@ void ServerLobby::checkRaceFinished()
     }
     RaceManager::get()->setItemlessMode(false);
     RaceManager::get()->setNitrolessMode(false);
-
-
-    // Ranking script & TODO: Delete debug lines
-    if (ServerConfig::m_soccer_log)
-    {
-	    FILE* pipe = popen("python3 /home/supertuxkart/elo_bcf/bcf.py", "r");
-	    if (!pipe)
-	    {
-		    Log::info("ServerLobby", "Failed to start Python script");
-		    return;
-	    }
-	    char buffer[4096];
-	    while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
-	    {
-		    size_t len = strlen(buffer);
-		    if (len > 0 && buffer[len-1] == '\n')
-		    {
-			    buffer[len-1] = '\0';
-		    }
-		    Log::info("ServerLobby", "Python script output: %s", buffer);
-	    }
-	    pclose(pipe);
-    }
-
-}   // checkRaceFinished
+    
+}	// checkRaceFinished
 
 //-----------------------------------------------------------------------------
 /** Compute the new player's rankings used in ranked servers
@@ -5227,7 +5243,10 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
 	if (m_show_elo || m_show_rank)
 		elorank = getSoccerRanking(user_name);
 	if (m_show_elo)
-		profile_name = profile_name + L" [" + std::to_wstring(elorank.second).c_str() + L"]";
+	{
+		int display_elo = (elorank.second == 0) ? 1000 : elorank.second;
+		profile_name = profile_name + L" [" + std::to_wstring(display_elo).c_str() + L"]";
+	}
 	if (m_show_rank)
 	{
 		core::stringw rankstr(L"#");
@@ -5992,12 +6011,7 @@ void ServerLobby::configPeersStartTime()
           + "Laps: " + std::to_string(RaceManager::get()->getNumLaps());
 
     }
-    else 
-    {
-        Log::info("ServerLobby", "no time trial, so no log");	  
-    }
     logFile.open("race_log.txt", std::ios::app);
-    Log::verbose("ServerLobby", "Succesfully opend race_log.txt");
     if (logFile.is_open())
     {
         logFile << log_msg << "\n";
@@ -6007,17 +6021,11 @@ void ServerLobby::configPeersStartTime()
 		Log::info("ServerLobby", "%s", log_msg.c_str());
 	}
     }
-    else 
-    {
-        Log::error("ServerLobby", "Failed to open the .txt");
-    }
 
     try 
     {
         std::string python_output = ServerLobby::exec_python_script();
-        Log::verbose("ServerLobby", "trying to delete line breaks");
         python_output.erase(std::remove(python_output.begin(), python_output.end(), '\n'), python_output.end());
-        Log::verbose("ServerLobby", "Deleted line breaks");
         Log::info("ServerLobby", "%s", python_output.c_str());
 	if (python_output.length() > 2)
 	{
@@ -6030,7 +6038,7 @@ void ServerLobby::configPeersStartTime()
     }
     if (m_replay_requested && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
     {
-        std::string replay_path = "/home/supertuxkart/stk-code/data/replay/";
+        std::string replay_path = ServerConfig::m_replay_dir;
         std::string replay_name = replay_path + "race_" + getTimeStamp() + ".replay";
         //ReplayRecorder::get()->init();
         ReplayRecorder::get()->setFilename(replay_name);
@@ -7263,26 +7271,16 @@ void ServerLobby::handleServerCommand(Event* event,
     {
         if (m_game_setup->isGrandPrix() || !ServerConfig::m_live_players)
         {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
             std::string msg = "Server doesn't support spectate";
-            chat->encodeString16(StringUtils::utf8ToWide(msg));
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat;
+	    sendStringToPeer(msg, peer);
             return;
         }
 
         if (argv.size() != 2 || (argv[1] != "0" && argv[1] != "1") ||
             m_state.load() != WAITING_FOR_START_GAME)
         {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
             std::string msg = "Usage: spectate [0 or 1], before game started";
-            chat->encodeString16(StringUtils::utf8ToWide(msg));
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat;
+	    sendStringToPeer(msg, peer);
             return;
         }
 
@@ -7298,13 +7296,8 @@ void ServerLobby::handleServerCommand(Event* event,
             if (m_process_type == PT_CHILD &&
                 peer->getHostId() == m_client_server_host_id.load())
             {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
                 std::string msg = "Graphical client server cannot spectate";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true/*reliable*/);
-                delete chat;
+                sendStringToPeer(msg, peer);
                 return;
             }
             peer->setAlwaysSpectate(ASM_COMMAND);
@@ -7364,19 +7357,18 @@ void ServerLobby::handleServerCommand(Event* event,
     else if (argv[0] == "teamchat" || argv[0] == "tc" || argv[0] == "tchat")
     {
 
-        NetworkString* chat = getNetworkString();
-        chat->addUInt8(LE_CHAT);
-        chat->setSynchronous(true);
+        std::string message;
         if (player->hasRestriction(PRF_NOCHAT) ||
                 player->getPermissionLevel() <= PERM_NONE)
-            chat->encodeString16(L"You are not allowed to chat, /teamchat command has no effect.");
+	{
+		message = "You are not allowed to chat, /teamchat command has no effect.";
+	}
         else
         {
             m_team_speakers.insert(peer.get());
-            chat->encodeString16(L"Your messages are now addressed to team only");
+            message = "Your messages are now addressed to team only";
         }
-        peer->sendPacket(chat, true/*reliable*/);
-        delete chat;
+        sendStringToPeer(message, peer);
     }
 
     else if (argv[0] == "to" || argv[0] == "msg" || argv[0] == "dm" || argv[0] == "pm")
@@ -7387,12 +7379,8 @@ void ServerLobby::handleServerCommand(Event* event,
         if (player->hasRestriction(PRF_NOPCHAT) ||
                 player->getPermissionLevel() <= PERM_NONE)
         {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
-            chat->encodeString16(L"You are not allowed to send private messages.");
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat; 
+	    std::string message = "You are not allowed to send private messages.";
+            sendStringToPeer(message, peer);
             return;
         }
 
@@ -7409,13 +7397,9 @@ void ServerLobby::handleServerCommand(Event* event,
 
         if (argv.size() == 1)
         {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
-            chat->encodeString16(L"Usage: /to (username) message...");
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat; 
-            return;
+		std::string msg = "Usage: /to (username) message...";
+		sendStringToPeer(msg, peer);
+                return;
         }
         if (StringUtils::toLowerCase(argv[1]) == "server")
         {
@@ -8144,67 +8128,76 @@ void ServerLobby::handleServerCommand(Event* event,
         }
         if (page == 0)
             page = 1;
-
-        std::string msg("Soccer rankings (page ");
-        msg += std::to_string(page);
-        msg += "):\n";
-
-        if (!playername.empty())
-        {
-            // workaround for players which names are numeric
-            if (playername[0] == '$')
-                playername.erase(0, 1);
-
-            Log::verbose("ServerLobby", "username = %s", playername.c_str());
-
-            SoccerRanking::RankingEntry re = 
-                SoccerRanking::getRankOf(playername);
-            if (!re.m_rank)
-            {
-                msg = "No records for the player.";
-            }
-            else
-                msg = StringUtils::insertValues(
-                        "Ranking data of %s:\n"
-                        "Rank: %u,\n"
-                        "Played games: %f\n"
-                        "Average team size (%): %f\n"
-                        "Goals/game: %f\n"
-                        "Win rate: %f\n"
-                        "ELO: %d",
-                        re.m_name,
-                        re.m_rank,
-                        re.m_played_games,
-                        re.m_avg_team_size,
-                        re.m_goals_per_game,
-                        re.m_win_rate,
-                        re.m_elo
-                        );
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        std::vector<SoccerRanking::RankingEntry> rks;
-        SoccerRanking::readRankings(rks, max,
-                max * (page - 1));
-        if (rks.empty())
-        {
-            msg = "Rankings are currently unavailable.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        for (std::size_t i = 0; i < rks.size(); i++)
-        {
-            SoccerRanking::RankingEntry& re =
-                rks[i];
-            msg += StringUtils::insertValues(
-                    "%s #%u: %s (ELO %d)",
-                    "", re.m_rank, re.m_name.c_str(),
-                    re.m_elo
-                    );
-            if (i != rks.size() - 1)
-                msg += "\n";
-        }
-        sendStringToPeer(msg, peer);
+	std::string msg("Soccer rankings (page ");
+	msg += std::to_string(page);
+	msg += "):\n";
+	if (!playername.empty())
+	{
+		if (playername[0] == '$')
+			playername.erase(0, 1);
+		std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());
+		std::string line;
+		int rank = 1;
+		bool found = false;
+		while (std::getline(file, line))
+		{
+			std::istringstream iss(line);
+			std::string name;
+			std::string games_str, team_str, goals_str, win_str, elo_str;
+			iss >> name >> games_str >> team_str >> goals_str >> win_str >> elo_str;
+			if (name == playername)
+			{
+				msg = StringUtils::insertValues(
+						"Player: %s\n"
+						"Played Games: %s\n"
+						"Average team size: %s\n"
+						"Goals per Game: %s\n"
+						"Winning rate: %s\n"
+						"ELO: %s",
+						name.c_str(),
+						games_str.c_str(),
+						team_str.c_str(),
+						goals_str.c_str(),
+						win_str.c_str(),
+						elo_str.c_str());
+				found = true;
+				break;
+			}
+			rank++;
+		}
+		if (!found)
+			msg = "No records for the player.";
+		sendStringToPeer(msg, peer);
+		return;
+	}
+	std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());
+	std::string line;
+	int rank = 1;
+	int start = max * (page - 1);
+	int count = 0;
+	while (std::getline(file, line) && count < max)
+	{
+		if (rank <= start)
+		{
+			rank++;
+			continue;
+		}
+		std::istringstream iss(line);
+		std::string name;
+		float games, avg_team, goals, winrate;
+		int elo;
+		iss >> name >> games >> avg_team >> goals >> winrate >> elo;
+		msg += StringUtils::insertValues(
+				"%s #%d: %s (ELO %d)",
+				"", rank, name.c_str(), elo);
+		if (count != max - 1)
+			msg += "\n";
+		count++;
+		rank++;
+	}
+	if (count == 0)
+		msg = "Rankings are currently unavailable.";
+	sendStringToPeer(msg, peer);
     }
     else if (!ServerConfig::m_feature_filepath.toString().empty() && 
             (argv[0] == "feature" || argv[0] == "inform" || argv[0] == "ifm" || argv[0] == "bug" || argv[0] == "suggest"))
@@ -9158,7 +9151,9 @@ unmute_error:
         }
         if (argv.size() < 2)
         {
-            std::string msg = "Specify on or off as a second argument.";
+            std::string msg = "Current veto status: " + 
+		    std::string(player->getVeto() > 0 ? "ON" : "OFF") +
+		    "\nUse 'veto on' or 'veto off' to change.";
             sendStringToPeer(msg, peer);
         }
         if (argv[1] == "on")
@@ -9564,13 +9559,32 @@ unmute_error:
                 for (auto player : peer->getPlayerProfiles())
                 {
                     std::string username = StringUtils::wideToUtf8(player->getName());
-                    elorank = getPlayerRanking(username);
-                    player_vec.push_back(std::pair<std::string, int>(username, elorank.second));
-                    msg = "Player " + username + " will be sent into a team.";
-                    Log::info("ServerLobby", msg.c_str());
-                }
-            }
-        }
+                    std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());
+		    std::string line;
+		    bool found = false;
+		    int default_elo = 1500;
+                    while (std::getline(file, line))
+		    {
+			    std::istringstream iss(line);
+			    std::string name;
+			    int games;
+			    float team_size, goals_per_game, win_rate;
+			    int elo;
+			    iss >> name >> games >> team_size >> goals_per_game >> win_rate >> elo;
+			    if (name == username)
+			    {
+				    player_vec.push_back(std::pair<std::string, int>(username, elo));
+				    found = true;
+				    break;
+			    }
+		    }
+		    if (!found)
+			    player_vec.push_back(std::pair<std::string, int>(username, default_elo));
+		    msg = "Player " + username + " will be sent into a team.";
+		    Log::info("ServerLobby", msg.c_str());
+		}
+	    }
+	}
         int min = 0;
         std::vector <std::pair<std::string, int>> player_copy = player_vec;
         if (player_vec.size() % 2 == 1)  // in this case the number of players in uneven. In this case ignore the worst noob.
