@@ -51,8 +51,6 @@ ReplayRecorder::ReplayRecorder()
 {
     m_complete_replay = false;
     m_incorrect_replay = false;
-    Log::info("ReplayRecorder", "Replay Recorder: Constructor: incorrect=%d, complete=%d",
-		 m_incorrect_replay, m_complete_replay);  
 
     m_previous_steer   = 0.0f;
 
@@ -72,8 +70,6 @@ void ReplayRecorder::reset()
 {
     m_complete_replay = false;
     m_incorrect_replay = false;
-    Log::info("ReplayRecorder", "Replay Recorder Reset: incorrect=%d, complete=%d",
-		    m_incorrect_replay, m_complete_replay);
     m_transform_events.clear();
     m_physic_info.clear();
     m_bonus_info.clear();
@@ -94,8 +90,6 @@ void ReplayRecorder::reset()
  */
 void ReplayRecorder::init()
 {
-    Log::info("ReplayRecorder", "init start: incorrect=%d, complete=%d",
-		   m_incorrect_replay, m_complete_replay); 
     reset();
     m_incorrect_replay = false;	
     m_complete_replay = false; 
@@ -126,7 +120,6 @@ void ReplayRecorder::update(int ticks)
 {
 	if (m_transform_events.empty())
 	{
-		Log::info("ReplayRecorder", "Arrays not initialized, calling init()");
 		init();
 	}
     World *world = World::getWorld();
@@ -322,7 +315,6 @@ void ReplayRecorder::update(int ticks)
 
     if (world->getPhase() == World::RESULT_DISPLAY_PHASE && !m_complete_replay)
     {
-	Log::info("ReplayRecorder", "Race finished, marking replay as complete");    
         m_complete_replay = true;
 	save();
     }
@@ -369,7 +361,6 @@ uint64_t ReplayRecorder::computeUID(float min_time)
  */
 void ReplayRecorder::save()
 {
-    Log::info("ReplayRecorder", "Starting save save process");
     if (m_incorrect_replay)
     {
 #ifndef SERVER_ONLY
@@ -380,19 +371,8 @@ void ReplayRecorder::save()
 			    m_incorrect_replay, m_count_transforms.size());
 	    return;
     }
-    else
-    {
-	    Log::info("ReplayRecorder", "Proceeding with save...");
-    }
-
-#ifdef DEBUG
-    Log::debug("ReplayRecorder", "%d frames, %d removed because of"
-        "frequency compression", m_count, m_count_skipped_time);
-#endif
-    Log::info("ReplayRecorder", "Getting world data...");
     const World *world           = World::getWorld();
     const unsigned int num_karts = world->getNumKarts();
-    Log::info("ReplayRecorder", "Calculating min time...");
     float min_time = 99999.99f;
     for (unsigned int k = 0; k < num_karts; k++)
     {
@@ -401,7 +381,6 @@ void ReplayRecorder::save()
         if (cur_time < min_time)
             min_time = cur_time;
     }
-    Log::info("ReplayRecorder", "Creating filename...");
 
     int day, month, year;
     StkTime::getDate(&day, &month, &year);
@@ -411,7 +390,6 @@ void ReplayRecorder::save()
     oss << Track::getCurrentTrack()->getIdent() << "_" << year << month << day
         << "_" << num_karts << "_" << time << ".replay";
     m_filename = oss.str();
-    Log::info("ReplayRecorder", "Opening file for writing...");
     Log::info("ReplayRecorder", "Filename: %s", getReplayFilename().c_str());
     FILE *fd = openReplayFile(/*writeable*/true);
     if (!fd)
@@ -419,31 +397,23 @@ void ReplayRecorder::save()
         Log::error("ReplayRecorder", "Can't open '%s' for writing", getReplayFilename().c_str());
         return;
     }
-    Log::info("ReplayRecorder", "File opened successfully");
 
     core::stringw msg = _("Replay saved in \"%s\".",
         StringUtils::utf8ToWide(file_manager->getReplayDir() + getReplayFilename()));
     MessageQueue::add(MessageQueue::MT_GENERIC, msg);
-    Log::info("ReplayRecorder", "Writing version info...");
     fprintf(fd, "version: %d\n", getCurrentReplayVersion());
     fprintf(fd, "stk_version: %s\n", STK_VERSION);
-    Log::info("ReplayRecorder", "Writing kart list...");
     unsigned int player_count = 0;
+
     for (unsigned int real_karts = 0; real_karts < num_karts; real_karts++)
     {
         const AbstractKart *kart = world->getKart(real_karts);
         if (kart->isGhostKart()) continue;
-        Log::info("ReplayRecorder", "Writing kart %d info...", real_karts);
-	Log::info("ReplayRecorder", "Getting kart ident...");
-        // XML encode the username to handle Unicode
-	Log::info("ReplayRecorder", "Getting controller info...");
         fprintf(fd, "kart: %s %s\n", kart->getIdent().c_str(),			
                 StringUtils::xmlEncode(kart->getController()->getName()).c_str());
-	Log::info("ReplayRecorder", "Writing kart basic info...");
         
         if (kart->getController()->isPlayerController())
         {
-           Log::info("ReplayRecorder", "Writing player color info...");
            StateManager* state_manager = StateManager::get();
 	   if (state_manager && state_manager->getActivePlayer(player_count) &&
 			   state_manager->getActivePlayer(player_count)->getConstProfile())
@@ -462,7 +432,6 @@ void ReplayRecorder::save()
 
     int num_laps = RaceManager::get()->getNumLaps();
     if (num_laps == 9999) num_laps = 0; // no lap in that race mode
-    Log::info("ReplayRecorder", "Writing header data..."); 
     fprintf(fd, "kart_list_end\n");
     fprintf(fd, "reverse: %d\n",    (int)RaceManager::get()->getReverseTrack());
     fprintf(fd, "difficulty: %d\n", RaceManager::get()->getDifficulty());
@@ -471,15 +440,12 @@ void ReplayRecorder::save()
     fprintf(fd, "laps: %d\n",       num_laps);
     fprintf(fd, "min_time: %f\n",   min_time);
     fprintf(fd, "replay_uid: %" PRIu64 "\n", m_last_uid);
-    Log::info("ReplayRecorder", "Number of karts: %d", num_karts);
     for (unsigned int k = 0; k < std::min(num_karts, (unsigned)m_count_transforms.size()); k++)
     {
         if (world->getKart(k)->isGhostKart()) continue;
 
         const unsigned int num_transforms = std::min(m_max_frames,
                                                      m_count_transforms[k]);
-	Log::info("ReplayRecorder", "Number of transforms: %d", num_transforms);
-	Log::info("ReplayRecorder", "Kart %d has %d transforms", k, num_transforms);
 
         fprintf(fd, "size:     %d\n", num_transforms);
 
@@ -520,9 +486,7 @@ void ReplayRecorder::save()
                 );
         }   // for i
     }
-    Log::info("ReplayRecorder", "Closing file...");
     fclose(fd);
-    Log::info("ReplayRecorder", "Save completed successfully");
 }   // save
 
 /* Returns an encoding value for a given attachment type.
