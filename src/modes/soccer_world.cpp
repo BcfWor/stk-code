@@ -650,26 +650,25 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         // DernisNW comment: why is there an if statement then?
         if (sd.m_correct_goal)
 	{
-            if (m_soccer_log) GlobalLog::writeLog( "goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
-	    if (m_soccer_log)
+            if (m_soccer_log)
 	    {
-	  	  std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-	  	  float match_time = getTime();
-	   	 log_file << match_time << "s: " << player_name_log << " (" << team_name
+		    GlobalLog::writeLog( "goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
+	  	    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
+	  	    float match_time = getTime();
+	   	    log_file << match_time << "s: " << player_name_log << " (" << team_name
 			    << ") scored a goal\n";
-	   	 log_file.close();
-	   	 Log::verbose("SoccerWorld", "Succesfully editted the .log");
-	}
+	   	    log_file.close();
+	   }
 	}
 	else
 	{
-            if (m_soccer_log) GlobalLog::writeLog( "own_goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
-	    if (m_soccer_log)
+            if (m_soccer_log)
 	    {
-	    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-	    float match_time = getTime();
-	    log_file << match_time << "s: " << player_name_log << " (" << team_name << ") scored an own goal\n";
-	    log_file.close();
+		    GlobalLog::writeLog( "own_goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
+		    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
+		    float match_time = getTime();
+	    	    log_file << match_time << "s: " << player_name_log << " (" << team_name << ") scored an own goal\n";
+	    	    log_file.close();
 	    }
 	}
 
