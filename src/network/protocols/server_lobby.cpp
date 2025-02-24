@@ -2126,7 +2126,8 @@ void ServerLobby::asynchronousUpdate()
             m_game_setup->setRace(winner_vote);
             bool has_always_on_spectators = false;
             auto players = STKHost::get()
-                ->getPlayersForNewGame(&has_always_on_spectators);
+                ->getPlayersForNewGame(&has_always_on_spectators,
+                        winner_vote.m_track_name);
 
             if (players.size() > 0)
             {
