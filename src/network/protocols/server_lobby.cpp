@@ -7802,8 +7802,8 @@ void ServerLobby::handleServerCommand(Event* event,
             sendStringToPeer(msg, peer);
         }
     }
-    else if ((argv[0]=="redteam") || (argv[0] == "redt") ||
-		    (argv[0] == "blueteam") || (argv[0] == "bluet"))
+    else if ((argv[0] == "redteam") || (argv[0] == "redt") || (argv[0] == "rt") ||
+		    (argv[0] == "blueteam") || (argv[0] == "bluet") || (argv[0] == "bt"))
     {
         std::string msg;
         if (!ServerConfig::m_team_choosing || !RaceManager::get()->teamEnabled() || ServerConfig::m_supertournament || player->getPermissionLevel() < PERM_PLAYER || player->hasRestriction(PRF_NOTEAM)) return;
@@ -7815,11 +7815,11 @@ void ServerLobby::handleServerCommand(Event* event,
         }
         auto pp = peer->getPlayerProfiles()[0];
         peer->setAlwaysSpectate(ASM_NONE);
-        if (argv[0] == "redteam" || argv[0] == "redt")
+        if (argv[0] == "redteam" || argv[0] == "redt" || argv[0] == "rt")
 	{
 		pp->setTeam(KART_TEAM_RED);
 	}
-	else if (argv[0] == "blueteam" || argv[0] == "bluet")
+	else if (argv[0] == "blueteam" || argv[0] == "bluet" || argv[0] == "bt")
 	{
 		pp->setTeam(KART_TEAM_BLUE);
 	}
