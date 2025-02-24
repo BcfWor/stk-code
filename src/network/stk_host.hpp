@@ -441,7 +441,8 @@ public:
     uint32_t getTotalPlayers() const         { return m_total_players.load(); }
     // ------------------------------------------------------------------------
     std::vector<std::shared_ptr<NetworkPlayerProfile> >
-        getPlayersForNewGame(bool* has_always_on_spectators = NULL) const;
+        getPlayersForNewGame(bool* has_always_on_spectators = NULL,
+                const std::string track_ident = "") const;
     // ------------------------------------------------------------------------
     void replaceNetwork(Network* new_network)
     {

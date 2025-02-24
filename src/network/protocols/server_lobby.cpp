@@ -2258,15 +2258,7 @@ void ServerLobby::asynchronousUpdate()
             // Reset for next state usage
             resetPeersReady();
             m_state = LOAD_WORLD;
-            // Load world only for those peers that have the track installed.
-            STKHost::get()->sendPacketToAllPeersWith( 
-                    [winner_vote](STKPeer* peer)
-                    {
-                        std::pair<std::set<std::string>, std::set<std::string>>
-                            client_assets = peer->getClientAssets();
-                        return client_assets.second.find(winner_vote.m_track_name) !=
-                            client_assets.second.end();
-                    }, load_world_message, true /*reliable*/);
+            sendMessageToPeers(load_world_message);
             // updatePlayerList so the in lobby players (if any) can see always
             // spectators join the game
             if (has_always_on_spectators)

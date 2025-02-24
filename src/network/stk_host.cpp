@@ -1620,7 +1620,8 @@ std::pair<int, int> STKHost::getAllPlayersTeamInfo() const
 /** Get the players for starting a new game.
  *  \return A vector containing pointers on the players profiles. */
 std::vector<std::shared_ptr<NetworkPlayerProfile> >
-    STKHost::getPlayersForNewGame(bool* has_always_on_spectators) const
+    STKHost::getPlayersForNewGame(bool* has_always_on_spectators,
+            const std::string track_ident) const
 {
     // Forced position overrides if specified
     std::vector<std::shared_ptr<NetworkPlayerProfile> > players;
@@ -1640,7 +1641,16 @@ std::vector<std::shared_ptr<NetworkPlayerProfile> >
         if (has_always_on_spectators && stk_peer->alwaysSpectate())
         {
             *has_always_on_spectators = true;
-            stk_peer->setWaitingForGame(false);
+
+            if (track_ident.empty())
+                stk_peer->setWaitingForGame(false);
+            else
+            {
+                // test for assets, only send peer to the game when the track_ident
+                // is available to be loaded.
+                std::set<std::string> tracks = stk_peer->getClientAssets().second;
+                stk_peer->setWaitingForGame(tracks.find(track_ident) == tracks.end());
+            }
             stk_peer->setSpectator(true);
             continue;
         }
