@@ -3472,7 +3472,6 @@ void ServerLobby::startSelection(const Event *event)
 
     for (const std::string& kart_erase : karts_erase)
     {
-	Log::verbose("ServerLobby", "Erase kart %s", kart_erase.c_str());
         m_available_kts.first.erase(kart_erase);
     }
     for (const std::string& track_erase : tracks_erase)
@@ -3720,9 +3719,8 @@ skip_default_vote_randomizing:
         back_lobby->setSynchronous(true);
         back_lobby->addUInt8(LE_BACK_LOBBY).addUInt8(BLR_SPECTATING_NEXT_GAME);
         STKHost::get()->sendPacketToAllPeersWith(
-            [always_spectate_peers](STKPeer* peer) {
-            return always_spectate_peers.find(peer) !=
-            always_spectate_peers.end(); }, back_lobby, /*reliable*/true);
+            [](STKPeer* peer) {
+            return peer->alwaysSpectate(); }, back_lobby, /*reliable*/true);
         delete back_lobby;
         updatePlayerList();
     }
