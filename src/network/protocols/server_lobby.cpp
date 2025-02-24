@@ -9088,7 +9088,7 @@ unmute_error:
     {
 	    std::string msg = (
             	"/showcommands|commands|cmds|cmd, /vote, /spectate|s|sp|spec|spect, /addtime|addt"
-            	" /score|sc, /teamchat|tc|tchat, "
+            	" /score|sc, /teamchat|tc|tchat, /redteam|redt|rt, /blueteam|bluet|bt "
             	"/to|msg|dm|pm, /slots|sl, /public|pub|all,"
             	"/listserveraddon|lsa, /playerhasaddon|psa, /kick, /playeraddonscore|psa, /serverhasaddon|sha, /inform|ifm"
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
