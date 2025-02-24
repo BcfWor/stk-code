@@ -183,6 +183,7 @@ std::string ServerLobby::exec_python_script()
     {
         result += buffer.data();
     }
+
     return result;
 }
 
@@ -2232,7 +2233,7 @@ void ServerLobby::asynchronousUpdate()
             configRemoteKart(players, 0);
            
             std::string log_msg;
-            if(ServerConfig::m_soccer_log)
+            if (ServerConfig::m_soccer_log)
             {
                 if ((RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_NORMAL_RACE) ||
                     (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL) ||
@@ -2245,8 +2246,8 @@ void ServerLobby::asynchronousUpdate()
                 }
                 else
                     log_msg = "Addon: " + winner_vote.m_track_name;
-                GlobalLog::writeLog(log_msg + "\n", GlobalLogTypes::POS_LOG);
-                Log::info("AddonLog", log_msg.c_str());
+               	    GlobalLog::writeLog(log_msg + "\n", GlobalLogTypes::POS_LOG);
+                    Log::info("AddonLog", log_msg.c_str());
             }
             if (ServerConfig::m_supertournament)
             {
@@ -10994,7 +10995,7 @@ void ServerLobby::setPoleEnabled(bool mode)
 
         // send message to team members
         const core::stringw header =
-            L"Pole vote has been opened. Please vote for the teammate that will be at the "
+            L"Pole vote has been opened. If you want to remove your vote, use /999. Please vote for the teammate that will be at the "
             L"most front position towards the ball or puck:\n";
 
         core::stringw msg_red = header, msg_blue = header;
