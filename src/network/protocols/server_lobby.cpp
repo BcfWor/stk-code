@@ -3519,6 +3519,17 @@ void ServerLobby::startSelection(const Event *event)
         }
     }
 
+    // These tracks will never be selected when track voting is disabled
+    if (!ServerConfig::m_track_voting)
+    {
+	    std::vector<std::string> excluded = StringUtils::split(ServerConfig::m_excluded_tracks, ' ');
+	    for (const std::string& track : excluded)
+	    {
+		    std::string addon_track = "addon_" + track;
+		    m_available_kts.second.erase(addon_track);
+	    }
+    }
+
     RandomGenerator rg;
     std::set<std::string>::iterator it;
     bool track_voting = ServerConfig::m_track_voting;

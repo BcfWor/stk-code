@@ -347,6 +347,11 @@ namespace ServerConfig
         "Allow players to vote for which track to play. If this value is set "
         "to false, the server will randomly pick the next track to play."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_excluded_tracks
+	    SERVER_CFG_DEFAULT(StringServerConfigParam("",
+	    "excluded-tracks",
+	    "Tracks that will never be selected if track-voting = false."));
+
     SERVER_CFG_PREFIX BoolServerConfigParam m_command_track_mode
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "command-track-mode",
         "In order to play the next game, the player(s) need to use /settrack "
