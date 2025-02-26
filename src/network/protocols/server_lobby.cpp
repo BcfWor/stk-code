@@ -7457,6 +7457,11 @@ void ServerLobby::handleServerCommand(Event* event,
 
     else if (argv[0] == "slots" || argv[0] == "sl")
     {
+	if (argv[0] == "sl")
+        {
+            argv[0] = "slots"; 
+            cmd = std::regex_replace(cmd,std::regex("sl"),"slots");
+        }
 	if (argv.size() == 1 || argv[1] == "status")
 	{
 		int displayed_slots = m_max_players_in_game;
