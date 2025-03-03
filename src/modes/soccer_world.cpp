@@ -550,6 +550,11 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         NetworkConfig::get()->isClient()))
         return;
 
+    auto sl = LobbyProtocol::get<ServerLobby>();
+    float ball_speed = m_ball_body->getLinearVelocity().length() * 3.6f / 2.0f;
+    irr::core::stringw speed_message = StringUtils::insertValues(L"Shot Speed: %d km/h!", (int)ball_speed);
+    sl->broadcastMessageInGame(speed_message);
+
     if (getTicksSinceStart() < m_ticks_back_to_own_goal)
         return;
 
@@ -713,7 +718,6 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
 
-    auto sl = LobbyProtocol::get<ServerLobby>();
     if (sl->m_powerupper_active)
     {
         if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (once == 1) && (!isRaceOver()))
