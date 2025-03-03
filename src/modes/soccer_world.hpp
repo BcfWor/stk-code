@@ -38,6 +38,9 @@ class TrackSector;
  */
 class SoccerWorld : public WorldWithRank
 {
+private:
+	float m_current_ball_speed;
+	float m_max_ball_speed;
 public:
     struct ScorerData
     {
