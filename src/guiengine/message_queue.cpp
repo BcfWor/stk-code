@@ -27,6 +27,7 @@
 #include <IrrlichtDevice.h>
 #include <atomic>
 #include <memory>
+#include <algorithm>
 
 // Can be removed later when android STK uses SDL2
 #ifdef IOS_STK
@@ -418,6 +419,7 @@ void update(float dt)
  */
 void showProgressBar(int progress, const core::stringw& msg)
 {
+    progress = irr::core::clamp(progress, 0, 100); 
 #ifndef SERVER_ONLY
     if (GUIEngine::isNoGraphics())
         return;
