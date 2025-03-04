@@ -9641,6 +9641,12 @@ unmute_error:
     }
     else if (argv[0] == "goal" && argv[1] == "history")
     {
+	    if (m_state.load() != WAITING_FOR_START_GAME)
+	    {
+		    std::string msg = "This command only works in the lobby.";
+		    sendStringToPeer(msg, peer);
+		    return;
+	    }
 	    if (argv[2] == "red")
 	    {
 		    GoalHistory::showTeamGoalHistory(peer, 0);
