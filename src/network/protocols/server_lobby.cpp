@@ -2234,7 +2234,7 @@ void ServerLobby::asynchronousUpdate()
             configRemoteKart(players, 0);
            
             std::string log_msg;
-            if (ServerConfig::m_soccer_log)
+            if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
             {
                 if ((RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_NORMAL_RACE) ||
                     (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL) ||
@@ -2654,7 +2654,7 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
         addLiveJoiningKart(id, rki, m_last_live_join_util_ticks);
         Log::info("ServerLobby", "%s succeeded live-joining with kart id %d.",
             peer->getAddress().toString().c_str(), id);
-        if(ServerConfig::m_soccer_log)
+        if(ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
             GlobalLog::addIngamePlayer(id, StringUtils::wideToUtf8(rki.getPlayerName()), rki.getOnlineId() == 0);
 
@@ -2887,7 +2887,7 @@ void ServerLobby::update(int ticks)
             !GameProtocol::emptyInstance())
             return;
 
-        if (ServerConfig::m_soccer_log)
+        if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
         World* w = World::getWorld();
             
@@ -2972,6 +2972,11 @@ void ServerLobby::update(int ticks)
 					pclose(pipe);
 				});
 				python_thread.detach();
+	}
+	if (ServerConfig::m_race_log)
+	{
+		GlobalLog::writeLog("GAME_END\n", GlobalLogTypes::POS_LOG);
+		GlobalLog::closeLog(GlobalLogTypes::POS_LOG);
 	}
 	break;
     case RESULT_DISPLAY:
@@ -3442,7 +3447,7 @@ void ServerLobby::startSelection(const Event *event)
     unsigned max_player = 0;
     STKHost::get()->updatePlayers(&max_player);
     
-    if (ServerConfig::m_soccer_log)
+    if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
     {
         GlobalLog::writeLog("GAME_START\n", GlobalLogTypes::POS_LOG);
 	time_t now;
@@ -4400,7 +4405,7 @@ void ServerLobby::clientDisconnected(Event* event)
 
     std::string msg2;
     std::string player_name;
-    if(ServerConfig::m_soccer_log)
+    if(ServerConfig::m_soccer_log || ServerConfig::m_race_log)
     {
         World* w = World::getWorld();
         if (w)
@@ -4454,7 +4459,7 @@ void ServerLobby::clientDisconnected(Event* event)
 
 		m_replay_requested = false;
 	}
-	if (ServerConfig::m_soccer_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
+	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
 	{
             std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
             log_file << "Everyone left, game ended";
@@ -9666,7 +9671,7 @@ unmute_error:
             ns->encodeString16("The game will be restarted or continued.");
         else
             ns->encodeString16("The game has been interrupted.");
-	if (ServerConfig::m_soccer_log)
+	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
 	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
 	    log << "/end is used";

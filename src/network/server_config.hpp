@@ -261,6 +261,9 @@ namespace ServerConfig
     SERVER_CFG_PREFIX BoolServerConfigParam  m_soccer_log
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "soccer-log","Soccer Log (true or false.)"));
 
+    SERVER_CFG_PREFIX BoolServerConfigParam  m_race_log
+	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "race-log", "Race log (true or false)"));
+
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_log_path
         SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_log.txt", "soccer-log-path", "Directory where the soccer log should be written to with / at the end."));
     
@@ -271,7 +274,7 @@ namespace ServerConfig
 	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
 
     SERVER_CFG_PREFIX StringServerConfigParam m_ranked_script_path
-	SERVER_CFG_DEFAULT(StringServerConfigParam("bcf.py", "ranked-script-path", "File path to the ranking Python script."));   
+	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.py", "ranked-script-path", "File path to the ranking Python script."));   
 
     SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
 	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
