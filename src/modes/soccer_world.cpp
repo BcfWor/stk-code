@@ -541,7 +541,46 @@ void SoccerWorld::update(int ticks)
     }
     endSetKartPositions();*/
 }   // update
+//-----------------------------------------------------------------------------
+std::vector<GoalHistory::GoalData> GoalHistory::s_goal_history;
 
+void GoalHistory::addGoalData(const std::string& player, float speed, int team)
+{
+    GoalData goal = {player, speed, team, std::time(nullptr)};
+    s_goal_history.push_back(goal);
+}
+//-----------------------------------------------------------------------------
+void GoalHistory::showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team)
+{
+    auto sl = LobbyProtocol::get<ServerLobby>();
+
+    if (s_goal_history.empty())
+    {
+        std::string msg = "No goals scored yet!";
+	sl->sendStringToPeer(msg, peer);
+        return;
+    }
+
+    bool found_goals = false;
+    for (const auto& goal : s_goal_history)
+    {
+        if (goal.team == team)
+        {
+            found_goals = true;
+            std::string team_color = (team == 0) ? "Red" : "Blue";
+            std::string message = team_color + " goal by " + goal.player_name +
+                                " with " + std::to_string((int)goal.speed) + " km/h";
+            sl->sendStringToPeer(message, peer);
+        }
+    }
+
+    if (!found_goals)
+    {
+        std::string team_color = (team == 0) ? "Red" : "Blue";
+        std::string msg = "No goals scored by " + team_color + " team yet!";
+	sl->sendStringToPeer(msg, peer);
+    }
+}
 //-----------------------------------------------------------------------------
 void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 {
@@ -554,6 +593,8 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
     float ball_speed = m_ball_body->getLinearVelocity().length() * 3.6f / 2.0f;
     irr::core::stringw speed_message = StringUtils::insertValues(L"Shot Speed: %d km/h!", (int)ball_speed);
     sl->broadcastMessageInGame(speed_message);
+    std::string player_name = StringUtils::wideToUtf8(RaceManager::get()->getKartInfo(0).getPlayerName());
+    GoalHistory::addGoalData(player_name, ball_speed, getKartTeam(0));
 
     if (getTicksSinceStart() < m_ticks_back_to_own_goal)
         return;

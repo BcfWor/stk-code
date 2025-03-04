@@ -2654,7 +2654,7 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
         addLiveJoiningKart(id, rki, m_last_live_join_util_ticks);
         Log::info("ServerLobby", "%s succeeded live-joining with kart id %d.",
             peer->getAddress().toString().c_str(), id);
-        if(ServerConfig::m_soccer_log || ServerConfig::m_race_log)
+        if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
             GlobalLog::addIngamePlayer(id, StringUtils::wideToUtf8(rki.getPlayerName()), rki.getOnlineId() == 0);
 
@@ -6079,6 +6079,10 @@ void ServerLobby::configPeersStartTime()
 	    {
 		broadcastMessageInGame(
 		    StringUtils::utf8ToWide(game_start_message));
+	    }
+	    if (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
+	    {
+	    	GoalHistory::clearHistory();
 	    }
         });
 }   // configPeersStartTime
@@ -9635,7 +9639,18 @@ unmute_error:
         std::string message = "Teams have been generated automatically!";
         sendStringToAllPeers(message);
     }
-
+    else if (argv[0] == "goal" && argv[1] == "history")
+    {
+	    if (argv[2] == "red")
+	    {
+		    GoalHistory::showTeamGoalHistory(peer, 0);
+	    }
+	    else if (argv[2] == "blue")
+	    {
+		    GoalHistory::showTeamGoalHistory(peer, 1);
+	    }
+	    return;
+    }
     else if (argv[0] == "end" || argv[0] == "lobby")
     {
         // if the game is even active

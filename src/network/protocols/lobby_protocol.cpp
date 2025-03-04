@@ -120,7 +120,7 @@ void LobbyProtocol::configRemoteKart(
     }
     // Create the kart information for the race manager:
     // -------------------------------------------------
-    if (ServerConfig::m_soccer_log) GlobalLog::resetIngamePlayers();
+    if (ServerConfig::m_soccer_log || ServerConfig::m_race_log) GlobalLog::resetIngamePlayers();
     for (unsigned int i = 0; i < players.size(); i++)
     {
         const std::shared_ptr<NetworkPlayerProfile>& profile = players[i];
@@ -164,7 +164,7 @@ void LobbyProtocol::configRemoteKart(
         rki.setNetworkPlayerProfile(profile);
         // Inform the race manager about the data for this kart.
         RaceManager::get()->setPlayerKart(i, rki);
-	if (ServerConfig::m_soccer_log)
+	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
             GlobalLog::addIngamePlayer(i, StringUtils::wideToUtf8(profile->getName()), profile->isOfflineAccount());
 	    auto kart_team = profile->getTeam();

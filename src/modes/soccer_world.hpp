@@ -31,7 +31,23 @@ class Controller;
 class NetworkString;
 class TrackObject;
 class TrackSector;
+class GoalHistory 
+{
+private:
+    struct GoalData 
+    {
+        std::string player_name;
+        float speed;
+        int team;
+        std::time_t timestamp;
+    };
+    static std::vector<GoalData> s_goal_history;
 
+public:
+    static void addGoalData(const std::string& player, float speed, int team);
+    static void showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team);
+    static void clearHistory() { s_goal_history.clear(); }
+};
 /** \brief An implementation of WorldWithRank, to provide the soccer game mode
  *  Notice: In soccer world, true goal means blue, false means red.
  * \ingroup modes
