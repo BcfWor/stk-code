@@ -264,6 +264,9 @@ namespace ServerConfig
     SERVER_CFG_PREFIX BoolServerConfigParam  m_race_log
 	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "race-log", "Race log (true or false)"));
 
+    SERVER_CFG_PREFIX BoolServerConfigParam  m_is_world_record_race
+	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "is-world-record-race", "Is world record race (true or false)"));
+
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_log_path
         SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_log.txt", "soccer-log-path", "Directory where the soccer log should be written to with / at the end."));
     

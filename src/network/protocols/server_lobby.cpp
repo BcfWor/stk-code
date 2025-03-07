@@ -5962,7 +5962,7 @@ void ServerLobby::broadcastMessageInGame(const irr::core::stringw& message)
 void ServerLobby::configPeersStartTime()
 {
     std::ofstream logFile;
-    if (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
+    if (ServerConfig::m_is_world_record_race)
     {
   	  logFile.open("race_log.txt", std::ios::trunc);
   	  logFile.close();
@@ -6019,40 +6019,38 @@ void ServerLobby::configPeersStartTime()
     World::getWorld()->setPhase(WorldStatus::SERVER_READY_PHASE);
     // Different stk process thread may have different stk host
     STKHost* stk_host = STKHost::get();
-    std::string log_msg;
-    if (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
+    if (ServerConfig::m_is_world_record_race)
     {
-    log_msg = "Track: " + std::string(RaceManager::get()->getTrackName()) + ", "
-              + "Reverse: " + (RaceManager::get()->getReverseTrack() ? "Yes" : "No") + ", "
-          + "Laps: " + std::to_string(RaceManager::get()->getNumLaps());
-
+	    std::string log_msg;
+	    log_msg = "Track: " + std::string(RaceManager::get()->getTrackName()) + ", "
+		    + "Reverse: " + (RaceManager::get()->getReverseTrack() ? "Yes" : "No") + ", "
+		    + "Laps: " + std::to_string(RaceManager::get()->getNumLaps());
+	    logFile.open("race_log.txt", std::ios::app);
+	    if (logFile.is_open())
+	    {
+		    logFile << log_msg << "\n";
+		    logFile.close();
+		    if (!log_msg.empty())
+		    {
+			    Log::info("ServerLobby", "%s", log_msg.c_str());
+		    }
+	    }
+	    try
+	    {
+		    std::string python_output = ServerLobby::exec_python_script();
+		    python_output.erase(std::remove(python_output.begin(), python_output.end(), '\n'), python_output.end());
+		    Log::info("ServerLobby", "%s", python_output.c_str());
+		    if (python_output.length() > 2)
+		    {
+			    sendStringToAllPeers(python_output);
+		    }
+	    }
+	    catch (const std::exception& e)
+	    {
+		    Log::error("ServerLobby", "Python script execution failed: %s", e.what());
+	    }
     }
-    logFile.open("race_log.txt", std::ios::app);
-    if (logFile.is_open())
-    {
-        logFile << log_msg << "\n";
-        logFile.close();
-	if (!log_msg.empty())
-	{
-		Log::info("ServerLobby", "%s", log_msg.c_str());
-	}
-    }
-
-    try 
-    {
-        std::string python_output = ServerLobby::exec_python_script();
-        python_output.erase(std::remove(python_output.begin(), python_output.end(), '\n'), python_output.end());
-        Log::info("ServerLobby", "%s", python_output.c_str());
-	if (python_output.length() > 2)
-	{
-		sendStringToAllPeers(python_output);
-	}
-    }
-    catch (const std::exception& e)
-    {
-        Log::error("ServerLobby", ("Error while trying to run the python script: " + std::string(e.what())).c_str());
-    }
-    if (m_replay_requested && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
+    if (m_replay_requested && ServerConfig::m_is_world_record_race)
     {
         std::string replay_path = ServerConfig::m_replay_dir;
         std::string replay_name = replay_path + "race_" + getTimeStamp() + ".replay";
