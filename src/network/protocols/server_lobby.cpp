@@ -2908,13 +2908,13 @@ void ServerLobby::update(int ticks)
            if (file_manager->fileExists(replay_path))
            {
                Log::info("ServerLobby", "Replay file verified at: %s", replay_path.c_str());
-               std::string msg= "The replay has been successfully recorded and properly saved!";
-               sendStringToAllPeers(msg);
+               irr::core::stringw msg = "The replay has been successfully recorded and properly saved!";
+               broadcastMessageInGame(msg);
            }
            else
            {
                Log::error("ServerLobby", "Replay file not found at: %s", replay_path.c_str());
-                       Log::error("ServerLobby", "Failed to save replay"); 
+	       Log::error("ServerLobby", "Failed to save replay"); 
            }
            // This is no longer required since the replay recording can be turned off with the command /replay off
            // m_replay_requested = false;
