@@ -593,8 +593,6 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
     float ball_speed = m_ball_body->getLinearVelocity().length() * 3.6f / 2.0f;
     irr::core::stringw speed_message = StringUtils::insertValues(L"Shot Speed: %d km/h!", (int)ball_speed);
     sl->broadcastMessageInGame(speed_message);
-    std::string player_name = StringUtils::wideToUtf8(RaceManager::get()->getKartInfo(0).getPlayerName());
-    GoalHistory::addGoalData(player_name, ball_speed, getKartTeam(0));
 
     if (getTicksSinceStart() < m_ticks_back_to_own_goal)
         return;
@@ -692,6 +690,9 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         Log::verbose("SoccerWorld", "%s %s %s", 
                 sd.m_correct_goal ? "goal" : "own_goal",
                 player_name_log.c_str(), team_name.c_str());
+	int team = getKartTeam(sd.m_id);
+        GoalHistory::addGoalData(player_name_log, ball_speed, team);
+
 
         // DernisNW comment: why is there an if statement then?
         if (sd.m_correct_goal)
