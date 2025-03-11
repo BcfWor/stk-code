@@ -5317,7 +5317,7 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
             boolean_combine |= 1;
 
         // Show monitor display icon (spectating)
-        if (p && (p->isSpectator() ||
+        if (!p->isAIPeer() && p && (p->isSpectator() ||
             ((m_state.load() == WAITING_FOR_START_GAME ||
             update_when_reset_server) && p->alwaysSpectate())))
             boolean_combine |= (1 << 1);
