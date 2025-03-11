@@ -5008,6 +5008,26 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 
     sendRandomInstalladdonLine(peer);
     sendCurrentModifiers(peer);
+    
+    // Assign random kart
+    if (m_random_karts_enabled && m_state.load() == WAITING_FOR_START_GAME)
+    {
+	    auto player = peer->getPlayerProfiles();
+	    if (!player.empty())
+	    {
+		    RandomGenerator random_gen;
+		    for (unsigned i = 0; i < player.size(); i++)
+		    {
+			    auto& player_profile = player[i];
+			    std::set<std::string>::iterator it = m_available_kts.first.begin();
+			    std::advance(it, random_gen.get((int)m_available_kts.first.size()));
+			    std::string selected_kart = *it;
+			    player_profile->forceKart(selected_kart);
+			    std::string msg = "Random kart has been assigned because /randomkarts is currently enabled";
+			    sendStringToPeer(msg, peer);
+		    }
+	    }
+    }
 
     const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
     NetworkString* message_ack = getNetworkString(4);
