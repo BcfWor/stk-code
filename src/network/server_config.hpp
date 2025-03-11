@@ -234,14 +234,6 @@ namespace ServerConfig
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-cakeparty",
         "Allow cake party command."));
 
-    SERVER_CFG_PREFIX BoolServerConfigParam m_allow_plungerparty
-        SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-plungerparty",
-        "Allow plunger party command."));
-
-    SERVER_CFG_PREFIX BoolServerConfigParam m_allow_zipperparty
-        SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-zipperparty",
-        "Allow zipper party command."));
-
     SERVER_CFG_PREFIX BoolServerConfigParam m_allow_pole
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-pole",
         "Allow pole. Players can team vote which teammate gets the leading start position."));

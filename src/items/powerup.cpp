@@ -594,14 +594,6 @@ void Powerup::hitBonusBox(const ItemState &item_state)
 	    m_number = 0;
 	    set(PowerupManager::POWERUP_CAKE, 2);
 	    return;
-	case TSM_PLUNGERPARTY:
-	    m_number = 0;
-	    set(PowerupManager::POWERUP_PLUNGER, 5);
-  	    return;
-	case TSM_ZIPPERPARTY:
-	    m_number = 0;
-	    set(PowerupManager::POWERUP_ZIPPER, 3);
-	    return;
 	case TSM_BOWLTRAININGPARTY:
 	    m_number = 0;
 	    set(PowerupManager::POWERUP_BOWLING, 1);

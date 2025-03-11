@@ -55,8 +55,6 @@ Powerup::SpecialModifier TierSRoulette::bufToTSM(
     if (!strncasecmp(buf, "none", size))        return Powerup::TSM_NONE;
     if (!strncasecmp(buf, "bowlparty", size))   return Powerup::TSM_BOWLPARTY;
     if (!strncasecmp(buf, "cakeparty", size))   return Powerup::TSM_CAKEPARTY;
-    if (!strncasecmp(buf, "plungerparty", size))return Powerup::TSM_PLUNGERPARTY;
-    if (!strncasecmp(buf, "zipperparty", size)) return Powerup::TSM_ZIPPERPARTY;
     
     return Powerup::TSM_NONE;
 }
