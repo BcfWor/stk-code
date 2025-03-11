@@ -101,121 +101,7 @@
 #include "utils/file_utils.hpp"
 #include "utils/time.hpp"
 
-
-
-// =======================================================================
-// Assigns random karts to all players in the lobby
-// Uses the available kart list to randomly select karts
-
-void ServerLobby::assignRandomKarts()
-{
-    if (m_peers_ready.empty())
-    {
-        Log::error("ServerLobby", "No players in the lobby to assign random karts.");
-        return;
-    }
-    if (m_available_kts.first.empty())
-    {
-        Log::error("ServerLobby", "No karts available.");
-        return;
-    }
-    RandomGenerator random_gen;
-    for (auto& peer : m_peers_ready)
-    {
-        auto locked_peer = peer.first.lock();
-        if (!locked_peer)
-            continue;
-        auto player = locked_peer->getPlayerProfiles();
-        if (!player.empty())
-        {
-            for (unsigned i = 0; i < player.size(); i++)
-            {
-                auto& player_profile = player[i];
-                std::set<std::string>::iterator it = m_available_kts.first.begin();
-                std::advance(it, random_gen.get((int)m_available_kts.first.size()));
-                std::string selected_kart = *it;
-                player_profile->forceKart(selected_kart);
-            }
-        }
-    }
-    std::string msg = "Random karts have been forcibly assigned to all players, to disable this state: /randomkarts off";
-    sendStringToAllPeers(msg);
-}
-// ===============================================================================
-// Resets all kart selections for players in the lobby
-// Removes any forced kart assignments
-
-void ServerLobby::resetKartSelections()
-{
-	for (auto& peer : m_peers_ready)
-	{
-		auto locked_peer = peer.first.lock();
-		if (!locked_peer)
-			continue;
-		auto player = locked_peer->getPlayerProfiles();
-		if (!player.empty())
-		{
-			for (unsigned i = 0; i < player.size(); i++)
-			{
-				auto& player_profile = player[i];
-				player_profile->unforceKart();
-			}
-		}
-	}
-}
-
-// ========================================================================
-// Executes the Python script for track records and returns its output
-
-std::string ServerLobby::exec_python_script()
-{
-    std::array<char, 1024> buffer;
-    std::string result;
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(
-        popen("python3 track_records.py", "r"), pclose);
-
-    if (!pipe)
-    {
-        throw std::runtime_error("popen() failed!");
-    }
-
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
-    {
-        result += buffer.data();
-    }
-
-    return result;
-}
-
 int ServerLobby::m_fixed_laps = -1;
-// =========================================================================
-// Gets a player's soccer ranking and rating from the ranking file
-// Returns a pair containing:
-// - first: player's rank (or max unsigned int if not found)
-// - second: player's rating (or 0 if not found)
-// Reads through ranking file line by line to find matching username
-
-std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username) const
-{
-    std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());	
-    std::string line, name;
-    int rank = 1;
-    int rating;
-    while (std::getline(file, line))
-    {
-        std::istringstream iss(line);
-        iss >> name;
-        std::string word;
-        while (iss >> word) {
-            rating = std::stoi(word);
-        }
-        if (name == username)
-            return std::make_pair(rank, rating);
-        rank++;
-    }
-    return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
-}
-
 // ========================================================================
 class SubmitRankingRequest : public Online::XMLRequest
 {
@@ -12543,3 +12429,113 @@ void ServerLobby::updateTournamentTeams(const std::string& team_red, const std::
 
     updatePlayerList();
 }
+// =======================================================================
+// Assigns random karts to all players in the lobby
+// Uses the available kart list to randomly select karts
+
+void ServerLobby::assignRandomKarts()
+{
+    if (m_peers_ready.empty())
+    {
+        Log::error("ServerLobby", "No players in the lobby to assign random karts.");
+        return;
+    }
+    if (m_available_kts.first.empty())
+    {
+        Log::error("ServerLobby", "No karts available.");
+        return;
+    }
+    RandomGenerator random_gen;
+    for (auto& peer : m_peers_ready)
+    {
+        auto locked_peer = peer.first.lock();
+        if (!locked_peer)
+            continue;
+        auto player = locked_peer->getPlayerProfiles();
+        if (!player.empty())
+        {
+            for (unsigned i = 0; i < player.size(); i++)
+            {
+                auto& player_profile = player[i];
+                std::set<std::string>::iterator it = m_available_kts.first.begin();
+                std::advance(it, random_gen.get((int)m_available_kts.first.size()));
+                std::string selected_kart = *it;
+                player_profile->forceKart(selected_kart);
+            }
+        }
+    }
+    std::string msg = "Random karts have been forcibly assigned to all players, to disable this state: /randomkarts off";
+    sendStringToAllPeers(msg);
+}
+// ===============================================================================
+// Resets all kart selections for players in the lobby
+// Removes any forced kart assignments
+
+void ServerLobby::resetKartSelections()
+{
+        for (auto& peer : m_peers_ready)
+        {
+                auto locked_peer = peer.first.lock();
+                if (!locked_peer)
+                        continue;
+                auto player = locked_peer->getPlayerProfiles();
+                if (!player.empty())
+                {
+                        for (unsigned i = 0; i < player.size(); i++)
+                        {
+                                auto& player_profile = player[i];
+                                player_profile->unforceKart();
+                        }
+                }
+        }
+}
+// ========================================================================
+// Executes the Python script for track records and returns its output
+
+std::string ServerLobby::exec_python_script()
+{
+    std::array<char, 1024> buffer;
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(
+        popen("python3 track_records.py", "r"), pclose);
+
+    if (!pipe)
+    {
+        throw std::runtime_error("popen() failed!");
+    }
+
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
+    {
+        result += buffer.data();
+    }
+
+    return result;
+}
+// =========================================================================
+// Gets a player's soccer ranking and rating from the ranking file
+// Returns a pair containing:
+// - first: player's rank (or max unsigned int if not found)
+// - second: player's rating (or 0 if not found)
+// Reads through ranking file line by line to find matching username
+
+std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username) const
+{
+    std::ifstream file(ServerConfig::m_soccer_ranking_path.c_str());
+    std::string line, name;
+    int rank = 1;
+    int rating;
+    while (std::getline(file, line))
+    {
+        std::istringstream iss(line);
+        iss >> name;
+        std::string word;
+        while (iss >> word) {
+            rating = std::stoi(word);
+        }
+        if (name == username)
+            return std::make_pair(rank, rating);
+        rank++;
+    }
+    return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
+}
+
