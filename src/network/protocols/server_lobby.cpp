@@ -8555,142 +8555,6 @@ void ServerLobby::handleServerCommand(Event* event,
         sendStringToAllPeers(message);	
     }
     else if (!ServerConfig::m_supertournament &&
-            (argv[0] == "plungerparty" || argv[0] == "pp" || argv[0] == "plungerfest"))
-    {
-        irr::core::stringw response;
-
-        if (argv[0] == "pp")
-        {
-            argv[0] = "plungerparty";
-            cmd = std::regex_replace(cmd,std::regex("pp"),"plungerparty");
-        }
-        else if (argv[0] == "plungerfest")
-        {
-            argv[0] = "plungerparty";
-            cmd = std::regex_replace(cmd,std::regex("plungerfest"),"plungerparty");
-        }
-        if (ServerConfig::m_soccer_log)
-        {
-                std::string msg = "You can only use this command on unranked TierS servers";
-                sendStringToPeer(msg, peer);
-                return;
-        }
-        if (argv.size() < 2 || (argv[1] != "on" && argv[1] != "off") )
-        {
-		std::string msg = "Specify on or off as a second argument.";
-		sendStringToPeer(msg, peer);
-		return;
-        }
-        bool state = argv[1] == "on";
-        auto rm = RaceManager::get();
-
-        if (state == (rm->getPowerupSpecialModifier() == Powerup::TSM_PLUNGERPARTY))
-        {
-            std::string msg = "Plungerparty is already active or inactive.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
-        if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_plungerparty &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
-        {
-            if (!voteForCommand(peer,cmd)) return;
-        }
-        else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-        if (rm->getPowerupSpecialModifier() == Powerup::TSM_PLUNGERPARTY &&
-                state)
-        {
-            std::string msg = "Plungerparty is already on.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        rm->setPowerupSpecialModifier(
-          state ? Powerup::TSM_PLUNGERPARTY : Powerup::TSM_NONE);
-        std::string message("Plungerparty is now ");
-        if (state)
-        {
-            message += "ACTIVE. Bonus boxes only give plungers.";
-        }
-        else
-        {
-            message += "INACTIVE. All standard items as normal.";
-        }
-
-        sendStringToAllPeers(message);
-    }
-    else if (!ServerConfig::m_supertournament &&
-            (argv[0] == "zipperparty" || argv[0] == "zp" || argv[0] == "zipperfest"))
-    {
-        irr::core::stringw response;
-
-        if (argv[0] == "zp")
-        {
-            argv[0] = "zipperparty";
-            cmd = std::regex_replace(cmd,std::regex("zp"),"zipperparty");
-        }
-        else if (argv[0] == "zipperfest")
-        {
-            argv[0] = "zipperparty";
-            cmd = std::regex_replace(cmd,std::regex("zipperfest"),"zipperparty");
-        }
-        if (ServerConfig::m_soccer_log)
-        {
-                std::string msg = "You can only use this command on unranked TierS servers";
-                sendStringToPeer(msg, peer);
-                return;
-        }	
-        if (argv.size() < 2 || (argv[1] != "on" && argv[1] != "off") )
-        {
-		std::string msg = "Specify on or off as a second argument.";
-            	sendStringToPeer(msg, peer);
-		return;
-        }
-        bool state = argv[1] == "on";
-        auto rm = RaceManager::get();
-
-        if (state == (rm->getPowerupSpecialModifier() == Powerup::TSM_ZIPPERPARTY))
-        {
-            std::string msg = "Zipperparty is already active or inactive.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
-        if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_zipperparty &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
-        {
-            if (!voteForCommand(peer,cmd)) return;
-        }
-        else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-        if (rm->getPowerupSpecialModifier() == Powerup::TSM_ZIPPERPARTY &&
-                state)
-        {
-            std::string msg = "Zipperparty is already on.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        rm->setPowerupSpecialModifier(
-          state ? Powerup::TSM_ZIPPERPARTY : Powerup::TSM_NONE);
-        std::string message("Zipperparty is now ");
-        if (state)
-        {
-            message += "ACTIVE. Bonus boxes only give zippers.";
-        }
-        else
-        {
-            message += "INACTIVE. All standard items as normal.";
-        }
-
-        sendStringToAllPeers(message);
-    }    
-    else if (!ServerConfig::m_supertournament &&
             (argv[0] == "bowlparty" || argv[0] == "bp"))
     {
         irr::core::stringw response;
@@ -9135,7 +8999,7 @@ unmute_error:
             	"/listserveraddon|lsa, /playerhasaddon|psa, /kick, /playeraddonscore|psa, /serverhasaddon|sha, /inform|ifm"
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
             	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date" 
-            	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /plungerparty|pp|plungerfest, /zipperparty|zp|zipperfest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /addons, /tracks, /karts, /randomkarts|rks "
+            	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
                 "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless"
         );
 	    sendStringToPeer(msg, peer);
@@ -9337,18 +9201,6 @@ unmute_error:
 	       sendStringToPeer(msg, peer);
 	       return;
        }
-      else if (argv[1] == "plungerparty")
-      {
-	      std::string msg = "Plungerparty on ensures (with enough votes) that there will be a game where the bonus boxes are filled with plungers.";
-              sendStringToPeer(msg, peer);
-              return;
-      }	     
-      else if (argv[1] == "zipperparty")
-      {
-              std::string msg = "Zippererparty on ensures (with enough votes) that there will be a game where the bonus boxes are filled with zippers.";
-              sendStringToPeer(msg, peer);
-              return;
-      }
       else if (argv[1] == "referee")
     {
         if (m_server_owner.lock() != peer && (!player || player->getPermissionLevel() > 50))
@@ -9461,14 +9313,6 @@ unmute_error:
             sendStringToPeer(msg, peer);
 	}
             return;
-        }
-    
-
-    else if (argv[0] == "addons")
-    {
-	    std::string msg = "/installaddon https://www.tierchester.eu/static/supertournamentaddons.zip";
-	    sendStringToPeer(msg, peer);
-	    return;
     }
     else if (argv[0] == "randomkarts" || argv[0] == "rks")
     {
