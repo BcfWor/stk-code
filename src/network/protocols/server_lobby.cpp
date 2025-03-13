@@ -5948,7 +5948,7 @@ void ServerLobby::configPeersStartTime()
 		    Log::info("ServerLobby", "%s", python_output.c_str());
 		    if (python_output.length() > 2)
 		    {
-			    sendStringToAllPeers(python_output);
+			    broadcastMessageInGame(StringUtils::utf8ToWide(python_output));
 		    }
 	    }
 	    catch (const std::exception& e)
