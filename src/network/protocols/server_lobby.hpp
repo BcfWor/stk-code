@@ -114,6 +114,7 @@ public:
                                  // Specified in the configuration file.
     };
 private:
+    bool checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer);
     bool m_random_karts_enabled;
     void assignRandomKarts();
     void resetKartSelections();
