@@ -3128,7 +3128,13 @@ void ServerLobby::startSelection(const Event *event)
             (m_max_players_in_game == 1 && event->getPeer()->alwaysSpectate());
         // this should give the privilege to immediately start the game
         const bool not_singleslot = m_max_players_in_game != 1;
-
+	
+	if (!checkAllStandardContentInstalled(peer))
+	{
+		std::string msg = "You cannot ready up because you are missing required standard tracks.";
+		sendStringToPeer(msg, peer);
+		return;
+	}
         // when the field is forced, check if the player has the field
         if (!canRace(peer))
         {
@@ -4913,6 +4919,12 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 			    sendStringToPeer(msg, peer);
 		    }
 	    }
+    }
+
+    if (!checkAllStandardContentInstalled(peer))
+    {
+	    Log::info("ServerLobby", "Player %s doesn't have all standard content installed.",
+			    peer->getAddress().toString().c_str());
     }
 
     const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
@@ -12523,4 +12535,33 @@ std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username)
     }
     return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
 }
-
+//=========================================================================
+// Checks if a player has all required standard tracks installed (except for allowed exceptions)
+bool ServerLobby::checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer)
+{
+    const auto& client_assets = peer->getClientAssets();
+    std::vector<std::string> missing_tracks;
+    std::set<std::string> allowed_missing_tracks = {"hole_drop", "oasis"};
+    const std::vector<std::string>& all_track_ids = track_manager->getAllTrackIdentifiers();   
+    for (const std::string& track_id : all_track_ids)
+    {
+        if (allowed_missing_tracks.find(track_id) != allowed_missing_tracks.end())
+            continue;      
+        Track* track = track_manager->getTrack(track_id);
+        if (track && !track->isAddon() && 
+            client_assets.second.find(track_id) == client_assets.second.end())
+        {
+            missing_tracks.push_back(track_id);
+        }
+    }
+    if (!missing_tracks.empty())
+    {
+        std::string msg = "You are missing standard tracks";   
+        msg += "\n\nMissing tracks:\n";
+        for (const auto& track : missing_tracks)
+            msg += "- " + track + "\n";
+        sendStringToPeer(msg, peer);
+        return false;
+    }   
+    return true;
+}
