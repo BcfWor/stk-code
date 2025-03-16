@@ -4923,8 +4923,11 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 
     if (!checkAllStandardContentInstalled(peer))
     {
+	    std::string player_name;
+	    if (!peer->getPlayerProfiles().empty())
+		    player_name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
 	    Log::info("ServerLobby", "Player %s doesn't have all standard content installed.",
-			    peer->getAddress().toString().c_str());
+			    player_name.c_str());
     }
 
     const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
