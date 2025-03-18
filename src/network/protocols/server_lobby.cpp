@@ -2829,37 +2829,8 @@ void ServerLobby::update(int ticks)
                 sw->tellCountIfDiffers();
         }
         Log::info("ServerLobby", "End of game message sent");
-	
-	// Soccer ranking
-        if(ServerConfig::m_soccer_log)
-	{
-		GlobalLog::writeLog("GAME_END\n", GlobalLogTypes::POS_LOG);
-		GlobalLog::closeLog(GlobalLogTypes::POS_LOG);
 
-		std::thread python_thread([this]()
-				{
-					std::string command = std::string("python3 ") + ServerConfig::m_ranked_script_path.c_str();
-					FILE* pipe = popen(command.c_str(), "r");
-					if (!pipe)
-					{
-						Log::info("ServerLobby", "Failed to start python script");
-						return;
-					}
-					char buffer[4096];
-					while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
-					{
-						size_t len = strlen(buffer);
-						if (len > 0 && buffer[len-1] == '\n')
-						{
-							buffer[len-1] = '\0';
-						}
-						Log::info("ServerLobby", "Ranking script: %s", buffer);
-					}
-					pclose(pipe);
-				});
-				python_thread.detach();
-	}
-	if (ServerConfig::m_race_log)
+        if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
 		GlobalLog::writeLog("GAME_END\n", GlobalLogTypes::POS_LOG);
 		GlobalLog::closeLog(GlobalLogTypes::POS_LOG);
