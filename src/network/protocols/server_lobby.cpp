@@ -12105,80 +12105,41 @@ std::string ServerLobby::get_elo_change_string()
     return result;
 }
 
-// returns rank and elo
-std::string ServerLobby::getPlayerAlt(std::string username) const
-{
-    std::string fileName = "soccer_ranking_altlist.txt";
-    std::ifstream in_file(fileName);
-    std::string player = "";
-    std::string player_alt = "";
-    std::string alt = "";
-    std::vector<std::string> split;
-    if (in_file.is_open())
-    {
-        std::string line;
-        while (std::getline(in_file, line))
-        {
-            split = StringUtils::split(line, ' ');
-            if (split.size() < 2) continue;
-            alt = split[1];
-            player = split[0];
-            if (player == username)
-                return alt;
-        }
-    }
-    in_file.close();
-    return player_alt;
-}
-
-// returns rank and elo
-std::pair<unsigned int, int> ServerLobby::getPlayerRanking(std::string username) const
-{
-    std::string fileName = "soccer_ranking.txt";
-    std::ifstream in_file(fileName);
-    int elo = 0;
-    unsigned int rank = 1;
-    std::string player = "";
-    std::string alt = ServerLobby::getPlayerAlt(username);
-    if (alt!="") username = alt;
-    std::vector<std::string> split;
-    if (in_file.is_open())
-    {
-        std::string line;
-        while (std::getline(in_file, line))
-        {
-            split = StringUtils::split(line, ' ');
-            if (split.size() < 6) continue;
-            elo = int(stof(split[5]));
-            player = split[0];
-            if (player == username)
-                return std::make_pair(rank, elo);
-            rank++;
-        }
-    }
-    in_file.close();
-    return std::make_pair(std::numeric_limits<unsigned int>::max(), 1000);
-}
-
 std::pair<std::vector<std::string>, std::vector<std::string>> ServerLobby::createBalancedTeams(std::vector<std::pair<std::string, int>>& elo_players)
 {
-    // Sort players by ELO	
-    std::sort(elo_players.begin(), elo_players.end(),
-		    [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b)
-		    {
-		    	return a.second > b.second;
-		    });
-    std::vector<std::string> red_team, blue_team;
-    bool red_turn = true;
-    for (const auto& player : elo_players)
+    int num_players = elo_players.size();
+    int min_elo_diff = INT_MAX;
+    int optimal_teams = -1;
+
+    for (int teams = 0; teams < pow(2, num_players - 1); teams++)
     {
-	    if (red_turn)
-		    red_team.push_back(player.first);
-	    else
-		    blue_team.push_back(player.first);
-	    red_turn = !red_turn;
+        int elo_red = 0, elo_blue = 0;
+        for (int player_idx = 0; player_idx < num_players; player_idx++)
+        {
+            if (teams & 1 << player_idx)
+                elo_red += elo_players[player_idx].second;
+            else
+                elo_blue += elo_players[player_idx].second;
+        }
+        int elo_diff = std::abs(elo_red - elo_blue);
+        if (elo_diff < min_elo_diff)
+        {
+            min_elo_diff = elo_diff;
+            optimal_teams = teams;
+        }
+        if (elo_diff == 0) break;
     }
-    return {red_team, blue_team};
+
+    std::vector<std::string> red_team, blue_team;
+
+    for (int player_idx = 0; player_idx < num_players; player_idx++)
+    {
+        if (optimal_teams & 1 << player_idx)
+            red_team.push_back(elo_players[player_idx].first);
+        else
+            blue_team.push_back(elo_players[player_idx].first);
+    }
+    return std::pair<std::vector<std::string>, std::vector<std::string>>(red_team, blue_team);
 }
 
 void ServerLobby::soccer_ranked_make_teams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec)
