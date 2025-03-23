@@ -8873,7 +8873,7 @@ unmute_error:
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
             	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date" 
             	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
-                "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless"
+                "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
         );
 	    sendStringToPeer(msg, peer);
         return;
@@ -9288,7 +9288,6 @@ unmute_error:
 		    {
 			    ball->setEnabled(true);
 			    ball->reset();
-			    // soccer_world->getBallGoalData()->resetCheckGoal(Track::getCurrentTrack());
 			    std::string msg = "The ball/puck has been reset";
 			    sendStringToAllPeers(msg);
 		    }
