@@ -284,6 +284,9 @@ public:
     // ------------------------------------------------------------------------
     TrackObject* getBall() const { return m_ball; }
 
+    // ------------------------------------------------------------------------
+    BallGoalData* getBallGoalData() const { return m_bgd.get(); }
+
     // SuperTournament
     // ------------------------------------------------------------------------
     virtual void stop() OVERRIDE;
