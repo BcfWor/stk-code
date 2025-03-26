@@ -8918,15 +8918,51 @@ unmute_error:
 
         setPoleEnabled(state);
     }
-    else if (argv[0] == "date")
+ 
+    else if (argv[0] == "date" || argv[0] == "time")
     {
-	    time_t now = time(0);
-	    char buffer[128];
-	    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", localtime(&now));
-	    std::string dt(buffer);
-	    sendStringToPeer(dt, peer);
-	    return;
-    }
+	   const std:unordered_map<std::string, double> TZ_OFFSETS = {
+		  {"GMT",0},  {"UTC",0},  {"IST",5.5},   {"PST",-8},  {"EST",-5},
+		  {"CET",1},  {"JST",9},  {"AEST",10}, {"DE",1},    {"US",-5},
+		  {"IN",5.5},   {"BRZ",-3}, {"FR",1},    {"RU",3},    {"IT",1},
+		  {"ES",1},   {"PL",1},   {"GB",0},    {"ARG",-3},  {"MX",-6},
+		  {"CA",-5}
+	   };
+
+	   if (argv.size() < 2)
+	   {
+		   std::string usage_msg = "Usage: /date (TIMEZONE) "
+			   "(e.g. /date UTC, /date IN, /date DE)";
+		   sendStringToPeer(usage_msg, peer);
+		   return;
+	   }
+	   // Use argv[1] as timezone
+	   std::string tz = argv[1];
+	   std::transform(tz.begin(), tz.end(), tz-begin(), ::toupper);
+	   auto it = TZ_OFFSETS.find(tz);
+	   if (it != TZ_OFFSETS.end())
+	   {
+		   // get time from server
+		   time_t now = time(nullptr);
+		   now += it->second * 3600;
+		   tm *gmtm = gmtime(&now);
+		   char buffer[256];
+		   strftime(buffer, sizeof(buffer), "%H:%M:%S UTC%z | %d-%m-%Y", gmtm);
+		   std::string time_msg = "[TIME]: " + std::string(buffer);
+		   // send msg
+		   sendStringToPeer(msg, peer);
+		   return;
+	   }
+	   else
+	   {
+		   std::string valid_tz;
+		   for (const auto& pair : TZ_OFFSETS)
+			   valid_tz += pair.first + " ";
+		   std::string error = " Invalid timezone or country code."
+			   "Valid codes: " + valid_tz;
+		   sendStringToPeer(error, peer);
+		   return;
+	   }
 
     // MODERATION TOOLKIT
     else if (argv[0] == "veto")
