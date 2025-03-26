@@ -61,6 +61,7 @@
 #include "race/tiers_roulette.hpp"
 #include "tracks/check_manager.hpp"
 #include "tracks/track.hpp"
+#include "tracks/track_object.hpp"
 #include "tracks/track_manager.hpp"
 #include "utils/log.hpp"
 #include "utils/random_generator.hpp"
@@ -8888,7 +8889,7 @@ unmute_error:
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
             	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date" 
             	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
-                "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless"
+                "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
         );
 	    sendStringToPeer(msg, peer);
         return;
@@ -9255,6 +9256,59 @@ unmute_error:
 	     }
 	     updatePlayerList();
 	     return;
+    }
+    else if (argv[0] == "resetpuck" || argv[0] == "resetball" || argv[0] == "rp" || argv[0] == "rb")
+    {
+            if (argv[0] == "resetpuck")
+            {
+                    argv[0] = "resetball";
+                    cmd = std::regex_replace(cmd, std::regex("resetpuck"), "resetball");
+            }
+            else if (argv[0] == "rp")
+            {
+                    argv[0] = "resetball";
+                    cmd = std::regex_replace(cmd, std::regex("rp"), "resetball");
+            }
+	    else if (argv[0] == "rb")
+	    {
+		    argv[0] == "resetball";
+		    cmd = std::regex_replace(cmd, std::regex("rb"), "resetball");
+	    }
+       	    if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+            {
+		    if (!voteForCommand(peer,cmd)) return;
+       	    }
+            else if (m_server_owner.lock() != peer &&
+			    (!player || player->getPermissionLevel() < PERM_REFEREE))
+	    {
+		    sendNoPermissionToPeer(peer.get(), argv);
+           	    return;
+       	    }
+	    if (RaceManager::get()->getMinorMode() != RaceManager::MINOR_MODE_SOCCER)
+	    {
+		    std::string msg = "This is only possible in TierS soccer servers";
+		    sendStringToPeer(msg, peer);
+		    return;
+	    }
+     	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    std::string msg = "This is only possible during a game";
+                    sendStringToPeer(msg, peer);
+                    return;
+            }
+	    SoccerWorld* soccer_world = dynamic_cast<SoccerWorld*>(World::getWorld());
+	    if (soccer_world)
+	    {
+		    TrackObject* ball = soccer_world->getBall();
+		    if (ball)
+		    {
+			    ball->setEnabled(true);
+			    ball->reset();
+			    std::string msg = "The ball/puck has been reset";
+			    sendStringToAllPeers(msg);
+		    }
+	    }
+	    return;
     }
     else if (argv[0] == "replay")
     {
