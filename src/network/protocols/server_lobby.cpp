@@ -873,7 +873,7 @@ void ServerLobby::handleChat(Event* event)
     {
         NetworkString* chat = getNetworkString();
         chat->setSynchronous(true);
-        core::stringw warn = L"Spam detected";
+        core::stringw warn = "Spam detected";
         chat->addUInt8(LE_CHAT).encodeString16(warn);
         event->getPeer()->sendPacket(chat, true/*reliable*/);
         delete chat;
@@ -888,7 +888,11 @@ void ServerLobby::handleChat(Event* event)
 
     KartTeam target_team = KART_TEAM_NONE;
 
-    // Determine and verify the name of the sender
+    // WTF????
+    if (event->data().size() > 0)
+        target_team = (KartTeam)event->data().getUInt8();
+
+    // determine and verify the name of the sender
     STKPeer* sender = event->getPeer();
     int msg_at = message.find(L": ");
     if (msg_at != -1)
@@ -904,169 +908,149 @@ void ServerLobby::handleChat(Event* event)
         message = sender_name + L": " + message;
     }
 
-    // Check if the message is a private message
-    if (message.size() > 4 && message.subString(0, 4) == L"/to ")
+    if (message.size() > 0)
     {
-        // Extract the target username and the actual message
-        core::stringw target_username = message.subString(4, message.findFirstOf(L' ', 4) - 4);
-        core::stringw actual_message = message.subString(message.findFirstOf(L' ', 4) + 1, message.size());
+        // Red or blue square emoji
+        if (target_team == KART_TEAM_RED)
+            message = StringUtils::utf32ToWide({0x1f7e5, 0x20}) + message;
+        else if (target_team == KART_TEAM_BLUE)
+            message = StringUtils::utf32ToWide({0x1f7e6, 0x20}) + message;
 
-        // Find the target peer
-        std::shared_ptr<STKPeer> target_peer = STKHost::get()->findPeerByName(target_username);
-        if (!target_peer)
+        //teamchat
+        //auto can_receive = m_message_receivers[sender];
+        bool team_speak = m_team_speakers.find(sender) != m_team_speakers.end();
+
+        // make a function of it for god sake, or at least a macro
+        team_speak &= (
+            RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER ||
+            RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_CAPTURE_THE_FLAG
+            );
+        std::set<KartTeam> teams;
+        for (auto& profile : sender->getPlayerProfiles())
         {
-            // Send error message to sender
-            NetworkString* chat = getNetworkString();
-            chat->setSynchronous(true);
-            core::stringw error_msg = L"Recipient not found.";
-            chat->addUInt8(LE_CHAT).encodeString16(error_msg);
-            sender->sendPacket(chat, true/*reliable*/);
-            delete chat;
+            if (!sender_profile && sender_name == profile->getName())
+            {
+                sender_profile = profile.get();
+            }
+            teams.insert(profile->getTeam());
+        }
+
+        // check if the sender_profile is authorised to send the message
+        if (!sender_profile || sender_profile->hasRestriction(PRF_NOCHAT) ||
+                sender_profile->getPermissionLevel() <= PERM_NONE)
+        {
+            // very evil chat log
+            Log::info("ServerLobby", "[MUTED] %s", StringUtils::wideToUtf8(message).c_str());
+            NetworkString* const response = getNetworkString();
+            response->setSynchronous(true);
+            response->addUInt8(LE_CHAT);
+
+            // very evil if you ask
+            if (ServerConfig::m_shadow_nochat)
+                response->encodeString16(message);
+            else
+                response->encodeString16(L"You are not allowed to send chat messages.");
+
+            sender->sendPacket(response, true/*reliable*/);
+            delete response;
+
             return;
         }
+        // evil chat log
+        Log::info("ServerLobby", "[CHAT] %s", StringUtils::wideToUtf8(message).c_str());
 
-        // Prepare the message for the recipient
-        NetworkString* recipient_msg = getNetworkString();
-        recipient_msg->setSynchronous(true);
-        core::stringw recipient_msg_content = L"[Private Message] From " + sender_name + L" to you -> " + actual_message;
-        recipient_msg->addUInt8(LE_CHAT).encodeString16(recipient_msg_content);
+        NetworkString* chat = getNetworkString();
+        chat->setSynchronous(true);
+        chat->addUInt8(LE_CHAT).encodeString16(message);
+        const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
+        const bool global_chat = ServerConfig::m_global_chat;
 
-        // Send the message to the recipient
-        target_peer->sendPacket(recipient_msg, true/*reliable*/);
-        delete recipient_msg;
-
-        // Prepare the message for the sender
-        NetworkString* sender_msg = getNetworkString();
-        sender_msg->setSynchronous(true);
-        core::stringw sender_msg_content = L"[Private Message] From you to " + target_username + L" -> " + actual_message;
-        sender_msg->addUInt8(LE_CHAT).encodeString16(sender_msg_content);
-
-        // Send the message to the sender
-        sender->sendPacket(sender_msg, true/*reliable*/);
-        delete sender_msg;
-
-        // Log the private message to the server GUI
-        Log::info("ServerLobby", "[PRIVATE MESSAGE] %s to %s: %s",
-            StringUtils::wideToUtf8(sender_name).c_str(),
-            StringUtils::wideToUtf8(target_username).c_str(),
-            StringUtils::wideToUtf8(actual_message).c_str());
-
-        return;
-    }
-
-    // Red or blue square emoji
-    if (target_team == KART_TEAM_RED)
-        message = StringUtils::utf32ToWide({0x1f7e5, 0x20}) + message;
-    else if (target_team == KART_TEAM_BLUE)
-        message = StringUtils::utf32ToWide({0x1f7e6, 0x20}) + message;
-
-    // Team chat
-    bool team_speak = m_team_speakers.find(sender) != m_team_speakers.end();
-
-    // Make a function of it for god sake, or at least a macro
-    team_speak &= (
-        RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER ||
-        RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_CAPTURE_THE_FLAG
-        );
-
-    std::set<KartTeam> teams;
-    for (auto& profile : sender->getPlayerProfiles())
-    {
-        if (!sender_profile && sender_name == profile->getName())
-        {
-            sender_profile = profile.get();
-        }
-        teams.insert(profile->getTeam());
-    }
-
-    // Check if the sender_profile is authorised to send the message
-    if (!sender_profile || sender_profile->hasRestriction(PRF_NOCHAT) ||
-            sender_profile->getPermissionLevel() <= PERM_NONE)
-    {
-        // Very evil chat log
-        Log::info("ServerLobby", "[MUTED] %s", StringUtils::wideToUtf8(message).c_str());
-        NetworkString* const response = getNetworkString();
-        response->setSynchronous(true);
-        response->addUInt8(LE_CHAT);
-
-        // Very evil if you ask
-        if (ServerConfig::m_shadow_nochat)
-            response->encodeString16(message);
-        else
-            response->encodeString16(L"You are not allowed to send chat messages.");
-
-        sender->sendPacket(response, true/*reliable*/);
-        delete response;
-
-        return;
-    }
-
-    // Evil chat log
-    Log::info("ServerLobby", "[CHAT] %s", StringUtils::wideToUtf8(message).c_str());
-
-    NetworkString* chat = getNetworkString();
-    chat->setSynchronous(true);
-    chat->addUInt8(LE_CHAT).encodeString16(message);
-    const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
-    const bool global_chat = ServerConfig::m_global_chat;
-
-    STKHost::get()->sendPacketToAllPeersWith(
-        [game_started, global_chat, sender_in_lobby, sender_spectating, target_team, sender_name, team_speak, teams, this]
-        (STKPeer* p)
-        {
-            if (game_started)
+        STKHost::get()->sendPacketToAllPeersWith(
+            [game_started, global_chat, sender_in_lobby, sender_spectating, target_team, sender_name, team_speak, teams, this]
+            (STKPeer* p)
             {
-                // Separates the chat between lobby peers, and ingame players/spectators
-                if (!global_chat && p->isWaitingForGame() != sender_in_lobby)
-                    return false;
-                // When targeted towards one team, send it.
-                if (target_team != KART_TEAM_NONE)
+                if (game_started)
                 {
-                    if (p->isSpectator())
+                    // separates the chat between lobby peers, and ingame players/spectators
+                    if (!global_chat && p->isWaitingForGame() != sender_in_lobby)
                         return false;
-                    for (auto& player : p->getPlayerProfiles())
+#if 0
+                    if (p->isWaitingForGame() && !sender_in_game)
+                        return false;
+                    if (!p->isWaitingForGame() && sender_in_game)
+                        return false;
+#endif
+                    // when targeted towards one team, send it.
+                    if (target_team != KART_TEAM_NONE)
                     {
-                        if (player->getTeam() == target_team)
-                            return true;
-                    }
-                    return false;
-                }
-                // Supertournament game: players should not be seeing spectator messages
-                if (!sender_in_lobby && sender_spectating && ServerConfig::m_supertournament && game_started &&
-                        (!p->isWaitingForGame() && !p->isSpectator()) && TournamentManager::get()->GameInitialized())
-                {
-                    for (auto& player : p->getPlayerProfiles())
-                    {
-                        if (TournamentManager::get()->GetKartTeam(
-                                    StringUtils::wideToUtf8(player->getName()))
-                                    != KART_TEAM_NONE)
-                        {
+                        if (p->isSpectator())
                             return false;
+                        for (auto& player : p->getPlayerProfiles())
+                        {
+                            if (player->getTeam() == target_team
+#if 0
+                                || player->getPermissionLevel() >= PERM_MODERATOR
+#endif
+                                )
+                                return true;
+                        }
+                        return false;
+                    }
+                    // supertournament game: players should not be seeing spectator 
+                    // messages, that are distracting
+                    if (!sender_in_lobby && sender_spectating && ServerConfig::m_supertournament && game_started &&
+                            (!p->isWaitingForGame() && !p->isSpectator()) && TournamentManager::get()->GameInitialized())
+                    {
+                        for (auto& player : p->getPlayerProfiles())
+                        {
+                            if (TournamentManager::get()->GetKartTeam(
+                                        StringUtils::wideToUtf8(player->getName())
+                                        ) != KART_TEAM_NONE)
+                            {
+                                return false;
+                            }
                         }
                     }
                 }
-            }
-            // /teamchat restrictions
-            if (team_speak)
-            {
-                for (auto& profile : p->getPlayerProfiles())
-                    if (teams.count(profile->getTeam()) > 0)
-                        return true;
-                return false;
-            }
-            for (auto& peer : m_peers_muted_players)
-            {
-                if (auto peer_sp = peer.first.lock())
+                // /teamchat restrictions
+                if (team_speak)
                 {
-                    if (peer_sp.get() == p &&
-                        peer.second.find(sender_name) != peer.second.end())
-                        return false;
+                    for (auto& profile : p->getPlayerProfiles())
+                        if (teams.count(profile->getTeam()) > 0
+#if 0
+                                || player->getPermissionLevel() >= PERM_MODERATOR
+#endif
+                            )
+                            return true;
+                    return false;
                 }
-            }
-            return true;
-        }, chat);
-        event->getPeer()->updateLastMessage();
-    delete chat;
+                for (auto& peer : m_peers_muted_players)
+                {
+                    if (auto peer_sp = peer.first.lock())
+                    {
+                        if (peer_sp.get() == p &&
+                            peer.second.find(sender_name) != peer.second.end())
+                            return false;
+                    }
+                }
+#if 0
+                // incase of no /to
+                if (can_receive.empty())
+                    return true;
+                for (auto& profile : p->getPlayerProfiles())
+                {
+                    if (can_receive.find(profile->getName()) !=
+                        can_receive.end())
+                    {
+                        return true;
+                    }
+                }
+#endif
+                return true;
+            }, chat);
+            event->getPeer()->updateLastMessage();
+        delete chat;
+    }
 }   // handleChat
 
 //-----------------------------------------------------------------------------
