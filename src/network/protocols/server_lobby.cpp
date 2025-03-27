@@ -7248,6 +7248,7 @@ void ServerLobby::handleServerCommand(Event* event,
             return;
         }
         changeTimeout(amount_sec, false, false);
+	sendRandomInstalladdonLine(peer);
     }
     else if (argv[0] == "score" || argv[0] == "sc")
     {
@@ -8937,14 +8938,14 @@ unmute_error:
           {"BR", -3},
           {"IN", 5.5},
           {"AR", -3},
-          {"CH", 8}
+          {"CH", 8},
           {"FR", 1},
           {"IT", 1},
           {"RU", 3},
           {"ES", 1},
           {"PL", 1},
           {"MX", -6},
-          {"NL", 1}
+          {"NL", 1},
           {"CA", -5},
           {"DE", 1},
           {"US", -5},
@@ -8986,6 +8987,7 @@ unmute_error:
 		   sendStringToPeer(error, peer);
 		   return;
 	   }
+    }
 
     // MODERATION TOOLKIT
     else if (argv[0] == "veto")
@@ -12335,8 +12337,6 @@ void ServerLobby::changeTimeout(long timeout, bool infinite, bool absolute)
 
     // and also send the changing seconds notification
     sendStringToAllPeers(msg);
-    // show random installaddon message after addtime
-    sendRandomInstalladdonLine(peer);
 }
 //-----------------------------------------------------------------------------
 void ServerLobby::onTournamentGameEnded()
