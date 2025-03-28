@@ -10875,6 +10875,7 @@ void ServerLobby::setPoleEnabled(bool mode)
     if (mode)
     {
         resetPeersReady();
+	updatePlayerList();
 
         std::vector<std::shared_ptr<NetworkPlayerProfile>>
             team_blue, team_red;
