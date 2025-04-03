@@ -114,6 +114,7 @@ public:
                                  // Specified in the configuration file.
     };
 private:
+    bool checkXmlEmoji(const std::string& username) const;
     bool checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer);
     bool m_random_karts_enabled;
     void assignRandomKarts();
@@ -544,6 +545,7 @@ public:
     core::stringw formatTeammateList(
             const std::vector<std::shared_ptr<NetworkPlayerProfile>> &team) const;
     void setPoleEnabled(bool mode);
+    void sendPoleMessage(STKPeer* peer);
     void submitPoleVote(std::shared_ptr<STKPeer>& voter, unsigned int vote);
 
     std::shared_ptr<NetworkPlayerProfile> decidePoleFor(const PoleVoterMap& mapping, KartTeam team) const;
@@ -620,6 +622,8 @@ public:
     void updateTournamentTeams(const std::string& team_red, const std::string& team_blue);
     bool isReplayRequested() const                                      { return m_replay_requested; }
     void setReplayRequested(const bool value)                           { m_replay_requested = value; }
+    // Soccer Roulette
+    void checkSoccerRoulette();
 };   // class ServerLobby
 
 #endif // SERVER_LOBBY_HPP

@@ -101,6 +101,7 @@
 #include "io/file_manager.hpp"
 #include "utils/file_utils.hpp"
 #include "utils/time.hpp"
+#include "modes/soccer_roulette.hpp"
 
 int ServerLobby::m_fixed_laps = -1;
 // ========================================================================
@@ -3852,8 +3853,12 @@ void ServerLobby::checkRaceFinished()
     // no powerup modifiers after each game
     RaceManager::get()->setPowerupSpecialModifier(
             Powerup::TSM_NONE);
-
-    
+    if (ServerConfig::m_soccer_roulette)
+    {
+	    checkSoccerRoulette();
+	    GoalHistory::saveGoalHistoryToFile();
+	    SoccerRoulette::get()->calculateGameResult();
+    } 
     if (ServerConfig::m_tiers_roulette)
     {
         tiers_roulette->rotate();
@@ -4820,18 +4825,6 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 
         std::string utf8_online_name = StringUtils::wideToUtf8(online_name);
 
-        if (ServerConfig::m_supertournament)
-        {
-            const KartTeam team = TournamentManager::get()->GetKartTeam(utf8_online_name);
-            if (team != KART_TEAM_NONE)
-                player->setTeam(team);
-            else
-                player->addRestriction(PRF_NOGAME);
-
-            if (set_kart.empty())
-                set_kart = TournamentManager::get()->GetKart(utf8_online_name);
-        }
-
         if (!set_kart.empty())
             player->forceKart(set_kart);
 
@@ -4841,8 +4834,7 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             player->setTeam(KART_TEAM_NONE);
         }
 
-        else if (ServerConfig::m_team_choosing &&
-                !ServerConfig::m_supertournament)
+        else if (ServerConfig::m_team_choosing)
         {
             KartTeam cur_team = KART_TEAM_NONE;
             if (red_blue.first > red_blue.second)
@@ -4901,6 +4893,13 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 	    Log::info("ServerLobby", "Player %s doesn't have all standard content installed.",
 			    player_name.c_str());
     }
+    if (ServerConfig::m_soccer_roulette)
+    {
+	    std::shared_ptr<NetworkPlayerProfile> profile = peer->getPlayerProfiles()[0];
+	    SoccerRoulette::get()->assignTeamToPlayer(profile.get());
+            updatePlayerList();
+    }
+
 
     const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
     NetworkString* message_ack = getNetworkString(4);
@@ -5165,19 +5164,11 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
 			rankstr.append(irr::core::stringw(elorank.first));
 		profile_name = rankstr + L" " + profile_name;
 	}
-        // Display the team in case of tournament
-        if (ServerConfig::m_supertournament)
-        {
-            std::string team = "[" + TournamentManager::get()->GetTeam(user_name) + "] ";
-            if (team != "[] ")
-                profile_name = StringUtils::utf8ToWide(team) + profile_name;
-            // Add hammer icon when profile has at least referee permissions
 
-            if (profile->getPermissionLevel() >= PERM_REFEREE)
-                profile_name = profile_name + " " + StringUtils::utf32ToWide({0x1f528});
-        }
-
-
+	if (checkXmlEmoji(user_name))
+	{
+		profile_name = StringUtils::utf32ToWide({0x1f3c6}) + " " + profile_name;
+	}
         pl->addUInt32(profile->getHostId()).addUInt32(profile->getOnlineId())
             .addUInt8(profile->getLocalPlayerId())
             .encodeString(profile_name);
@@ -5951,7 +5942,17 @@ void ServerLobby::configPeersStartTime()
         ReplayRecorder::get()->setFilename(replay_name);
         Log::info("ServerLobby", "Starting replay recording with filename: %s", replay_name.c_str());
     }
-
+    // Minimap
+    if (ServerConfig::m_soccer_roulette)
+    {
+	    SoccerRoulette::get()->giveNitroToAll();
+            SoccerRoulette::get()->startMinimapExport(
+			    SoccerRoulette::m_default_minimap_server,
+                            SoccerRoulette::m_default_minimap_port);
+            Log::info("ServerLobby", "Started soccer minimap export to %s:%d",
+                            SoccerRoulette::m_default_minimap_server.c_str(),
+                            SoccerRoulette::m_default_minimap_port);
+    }
            	    
     joinStartGameThread();
     m_start_game_thread = std::thread([start_time, stk_host, this]()
@@ -5966,7 +5967,7 @@ void ServerLobby::configPeersStartTime()
 	    const std::string game_start_message = ServerConfig::m_game_start_message;
 
 	    // Have Fun
-	    if (!game_start_message.empty())
+	    if (!game_start_message.empty() && !ServerConfig::m_soccer_roulette)
 	    {
 		broadcastMessageInGame(
 		    StringUtils::utf8ToWide(game_start_message));
@@ -6054,6 +6055,10 @@ void ServerLobby::resetServer()
     if (m_random_karts_enabled)
     {
 	    assignRandomKarts();
+    }
+    if (ServerConfig::m_soccer_roulette)
+    {
+	    setPoleEnabled(true);
     }
 }   // resetServer
 
@@ -10630,6 +10635,101 @@ unmute_error:
         bool state = argv[1] == "on";
         RaceManager::get()->setInfiniteMode(state);
     }
+    else if (argv[0] == "soccerroulette" || argv[0] == "sr")
+    {
+	    if (!player || player->getPermissionLevel() < PERM_REFEREE)
+	    {
+		    sendNoPermissionToPeer(peer.get(), argv);
+		    return;
+	    }
+	    if (!ServerConfig::m_soccer_roulette)
+	    {
+		    std::string msg = "These soccerroulette commands are only possible in special roulette servers";
+		    sendStringToPeer(msg, peer);
+		    return;
+	    }
+	    if (argv.size() < 2)
+	    {
+		    std::string msg = "Format: /soccerroulette on|off|status|add <field>|remove <field>|list|reset";
+		    sendStringToPeer(msg, peer);
+		    return;
+	    }
+	    if (argv[1] == "status")
+	    {
+		    bool is_enabled = ServerConfig::m_soccer_roulette;
+		    std::string current = SoccerRoulette::get()->getCurrentField();
+		    std::string msg = "Soccer Roulette is " + std::string(is_enabled ? "enabled" : "disabled");
+		    if (is_enabled)
+		    {
+			    msg += ". Current field: " + current;
+		    }
+		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "add" && argv.size() >= 3)
+	    {
+		    SoccerRoulette::get()->addField(argv[2]);
+		    std::string msg = "Added field " + argv[2] + " to Soccer Roulette";
+      		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "remove" && argv.size() >= 3)
+	    {
+		    SoccerRoulette::get()->removeField(argv[2]);
+		    std::string msg = "Removed field " + argv[2] + " from Soccer Roulette";
+		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "list")
+	    {
+
+		    const std::vector<std::string>& fields = SoccerRoulette::get()->getFields();
+		    std::string msg = "Soccer Roulette fields: ";
+		    for (size_t i = 0; i < fields.size(); i++)
+		    {
+			    msg += fields[i];
+			    if (i < fields.size() - 1)
+				    msg += ", ";
+		    }
+		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "reload")
+	    {
+		    SoccerRoulette::get()->reload();
+		    std::string msg = "Soccer Roulette fields reloaded from configuration";
+		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "teams")
+	    {
+		    std::string teams_info = SoccerRoulette::get()->getTeamsInfo();
+		    sendStringToPeer(teams_info, peer);
+	    }
+	    else if (argv[1] == "start")
+	    {
+		    std::string next_field = SoccerRoulette::get()->getNextField();
+		    bool success = forceSetTrack(next_field, 10, false, true, true);
+		    std::string msg;
+		    if (success)
+		    {
+			    msg = "Soccer Roulette started with field: " + next_field;
+		    }
+		    else
+		    {
+			    msg = "Failed to set field: " + next_field;
+		    }
+		    sendStringToAllPeers(msg);
+		    setPoleEnabled(true);
+	    }
+	    else if (argv[1] == "reset")
+	    {
+		    SoccerRoulette::get()->resetFieldIndex();
+		    std::string current_field = SoccerRoulette::get()->getCurrentField();
+		    std::string msg = "Soccer Roulette field index reset. Next field will be: " + current_field;
+		    sendStringToPeer(msg, peer);
+	    }
+	    else
+	    {
+		    std::string msg = "Unknown Soccer Roulette command. Format: /soccerroulette on|off|status|add <field>|remove <field>|list|reload|reset";
+		    sendStringToPeer(msg, peer);
+	    }
+    }
     else
     {
         std::string msg = "Unknown command: ";
@@ -10904,12 +11004,12 @@ void ServerLobby::setPoleEnabled(bool mode)
 
         host->sendPacketToAllPeersWith([host](STKPeer* p)
                 {
-                    if (p->isAIPeer() || !p->isConnected() || !p->isValidated()) return false;
+                    if (p->isAIPeer() || !p->isConnected() || !p->isValidated() || p->alwaysSpectate()) return false;
                     return host->isPeerInTeam(p, KART_TEAM_BLUE);
                 }, pkt_blue);
         host->sendPacketToAllPeersWith([host](STKPeer* p)
                 {
-                    if (p->isAIPeer() || !p->isConnected() || !p->isValidated()) return false;
+                    if (p->isAIPeer() || !p->isConnected() || !p->isValidated() || p->alwaysSpectate()) return false;
                     return host->isPeerInTeam(p, KART_TEAM_RED);
                 }, pkt_red);
 
@@ -10933,7 +11033,10 @@ void ServerLobby::setPoleEnabled(bool mode)
         m_command_voters["pole on"].clear();
         m_command_voters["pole off"].clear();
         std::string resp("Pole has been disabled.");
-        sendStringToAllPeers(resp);
+	if (!ServerConfig::m_soccer_roulette)
+	{
+		sendStringToAllPeers(resp);
+	}
     }
 } // setPoleEnabled
 
@@ -10966,6 +11069,12 @@ void ServerLobby::submitPoleVote(std::shared_ptr<STKPeer>& voter, const unsigned
     {
         sendStringToPeer(L"You need to be in the team in order to vote for the pole.", voter);
         return;
+    }
+
+    if (voter->alwaysSpectate())
+    {
+        sendStringToPeer(L"You need to disable spectator mode in order to vote for the pole.", voter);
+    	return;
     }
 
     if (team == KART_TEAM_RED)
@@ -12439,12 +12548,13 @@ bool ServerLobby::forceSetTrack(std::string track_id,
                 m_set_specvalue = specvalue;
                 std::string msg = is_soccer ? "Next played soccer field will be " + track_id + "." :
                     "Next played track will be " + track_id + ".";
-
-                // Send message to the lobby
-                sendStringToAllPeers(msg);
-
-                std::string msg2 = "setfield " + track_id;
-                Log::info("ServerLobby", msg2.c_str());
+		if (!ServerConfig::m_soccer_roulette)
+		{
+                	// Send message to the lobby
+           	        sendStringToAllPeers(msg);
+                        std::string msg2 = "setfield " + track_id;
+                        Log::info("ServerLobby", msg2.c_str());
+		}
             }
             return true;
         }
@@ -12591,6 +12701,7 @@ std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username)
         rank++;
     }
     return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
+    return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
 }
 //=========================================================================
 // Checks if a player has all required standard tracks installed (except for allowed exceptions)
@@ -12621,4 +12732,38 @@ bool ServerLobby::checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer
         return false;
     }   
     return true;
+}
+// Soccer Roulette
+void ServerLobby::checkSoccerRoulette()
+{
+    if (ServerConfig::m_soccer_roulette)
+    {
+        std::string next_field = SoccerRoulette::get()->getNextField();
+        Log::info("ServerLobby", "Soccer Roulette: Setting next field to %s", next_field.c_str());
+        forceSetTrack(next_field, 10, false, true, true);
+	//setPoleEnabled(true);
+    }
+}
+// check if this person has won the most recent soccer roulette event
+bool ServerLobby::checkXmlEmoji(const std::string& username) const
+{
+    std::string filename = "checkevent.xml";
+    XMLNode* root = file_manager->createXMLTree(filename);
+    if (!root) return false;
+    for (unsigned i = 0; i < root->getNumNodes(); i++)
+    {
+        const XMLNode* node = root->getNode(i);
+        if (node->getName() == "player")
+        {
+            std::string name;
+            node->get("name", &name);
+            if (name == username)
+            {
+                delete root;
+                return true;
+            }
+        }
+    }    
+    delete root;
+    return false;
 }
