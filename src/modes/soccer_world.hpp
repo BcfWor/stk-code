@@ -47,6 +47,7 @@ public:
     static void addGoalData(const std::string& player, float speed, int team);
     static void showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team);
     static void clearHistory() { s_goal_history.clear(); }
+    static void saveGoalHistoryToFile();
 };
 /** \brief An implementation of WorldWithRank, to provide the soccer game mode
  *  Notice: In soccer world, true goal means blue, false means red.

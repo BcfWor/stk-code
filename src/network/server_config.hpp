@@ -149,6 +149,21 @@ namespace ServerConfig
         SERVER_CFG_DEFAULT(IntServerConfigParam(
                     -1, "fixed-lap-count","fixed-lap-count"));
 
+    SERVER_CFG_PREFIX BoolServerConfigParam m_soccer_roulette
+	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "soccer-roulette",
+	"Enable soccer roulette to automatically rotate between soccer fields"));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_soccer_roulette_fields
+	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer,soccer_field,antarticy,huge",
+	"soccer-roulette-fields", "Comma-separated list of soccer fields to rotate between"));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_teams_xml_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("teams-xml-path.xml",
+	"teams-file", "Path to the teams file."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_gh_path_soccer_roulette
+	SERVER_CFG_DEFAULT(StringServerConfigParam("goalhistory_soccer_roulette.txt",
+	"goalhistory-path", "Path to the goal history soccer roulette file."));
 
     SERVER_CFG_PREFIX IntServerConfigParam m_server_port
         SERVER_CFG_DEFAULT(IntServerConfigParam(0, "server-port",

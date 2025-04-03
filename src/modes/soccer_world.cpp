@@ -49,7 +49,7 @@
 #include "utils/constants.hpp"
 #include "utils/translation.hpp"
 #include "utils/string_utils.hpp"
-
+#include "modes/soccer_roulette.hpp"
 #include <IMeshSceneNode.h>
 #include <numeric>
 #include <string>
@@ -410,10 +410,10 @@ void SoccerWorld::onGo()
     m_ball->setEnabled(true);
     m_ball->reset();
     WorldWithRank::onGo();
-    if (ServerConfig::m_soccer_log)
+    // live soccer
+    if (ServerConfig::m_soccer_log && !ServerConfig::m_soccer_roulette)
     {
     std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::trunc);
-    Log::verbose("SoccerWorld", "Cleared the contents of the log");
     time_t now = time(0);
     char* dt = ctime(&now);
     log_file << "New match started at: " << dt;
@@ -443,7 +443,6 @@ void SoccerWorld::onGo()
     }
     log_file << "\n\n";
     log_file.close();
-    Log::verbose("SoccerWorld", "Added teams, + new match started line");
     }
 }   // onGo
 
@@ -459,12 +458,11 @@ void SoccerWorld::terminateRace()
     }   // i<kart_amount
     tellCountIfDiffers();
     WorldWithRank::terminateRace();
-    if (ServerConfig::m_soccer_log)
+    if (ServerConfig::m_soccer_log && !ServerConfig::m_soccer_roulette)
     {
 	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
-   	 log << "Game ended! Final score: Red " << m_red_scorers.size() << " - " << m_blue_scorers.size() << " Blue\n";
-   	 Log::verbose("SoccerWorld", "Added final line");
-  	  log.close();
+	    log << "Game ended! Final score: Red " << m_red_scorers.size() << " - " << m_blue_scorers.size() << " Blue\n";
+     	    log.close();
     }
 } // terminateRace
 
@@ -582,6 +580,60 @@ void GoalHistory::showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team)
     }
 }
 //-----------------------------------------------------------------------------
+// Note: this is only used for soccer_roulette, not during normal games.
+// This because during a soccer roulette game, the "Shot Speed: %d km/h!" isnt send to the players.
+// Saves the goals history to a .txt file.
+//-----------------------------------------------------------------------------
+void GoalHistory::saveGoalHistoryToFile()
+{
+    try
+    {
+        if (s_goal_history.empty())
+        {
+            Log::info("SoccerWorld", "No goals to save to log file");
+            return;
+        }
+        std::string file_path = ServerConfig::m_gh_path_soccer_roulette;
+        std::ofstream file;
+        file.open(file_path.c_str(), std::ios::app);
+        if (!file.is_open())
+        {
+            Log::error("SoccerWorld", "Failed to open the file for writing");
+            return;
+        }
+        std::time_t now = std::time(nullptr);
+        char time_str[100];
+        std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+        file << "\n=== Soccer Game " << time_str << " ===\n";
+        int red_goals = 0;
+        int blue_goals = 0;
+        for (const auto& goal : s_goal_history)
+        {
+            if (goal.team == 0)
+                red_goals++;
+            else if (goal.team == 1)
+                blue_goals++;
+        }
+        file << "Final Score: Red " << red_goals << " - " << blue_goals << " Blue\n\n";
+        file << "Goal Details:\n";
+        for (const auto& goal : s_goal_history)
+        {
+            char goal_time[100];
+            std::strftime(goal_time, sizeof(goal_time), "%H:%M:%S", std::localtime(&goal.timestamp));
+            std::string team_name = (goal.team == 0) ? "Red" : "Blue";   
+            file << goal_time << " - " << team_name << " goal by " << goal.player_name 
+                 << " (" << (int)goal.speed << " km/h)\n";
+        }
+        file << "\n";
+        file.close();
+        Log::info("SoccerWorld", "Saved %d goals to soccer_goal_log.txt", s_goal_history.size());
+    }
+    catch (const std::exception& e)
+    {
+        Log::error("SoccerWorld", "Exception while saving goals: %s", e.what());
+    }
+}
+//-----------------------------------------------------------------------------
 void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 {
     if (isRaceOver() || isStartPhase() ||
@@ -592,8 +644,10 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
     auto sl = LobbyProtocol::get<ServerLobby>();
     float ball_speed = m_ball_body->getLinearVelocity().length() * 3.6f / 2.0f;
     irr::core::stringw speed_message = StringUtils::insertValues(L"Shot Speed: %d km/h!", (int)ball_speed);
-    sl->broadcastMessageInGame(speed_message);
-
+    if (!ServerConfig::m_soccer_roulette)
+    {
+	    sl->broadcastMessageInGame(speed_message);
+    }
     if (getTicksSinceStart() < m_ticks_back_to_own_goal)
         return;
 
