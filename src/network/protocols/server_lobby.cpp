@@ -7632,6 +7632,14 @@ void ServerLobby::handleServerCommand(Event* event,
             sendNoPermissionToPeer(peer.get(), argv);
             return;
         }
+
+	if (ServerConfig::m_soccer_roulette)
+	{
+		std::string msg = "Please ask a administrator to kick this person";
+		sendStringToPeer(msg, peer);
+		return;
+	}
+
         std::string player_name;
         if (cmd.length() > 5)
             player_name = cmd.substr(5);
@@ -10723,6 +10731,10 @@ unmute_error:
 		    std::string current_field = SoccerRoulette::get()->getCurrentField();
 		    std::string msg = "Soccer Roulette field index reset. Next field will be: " + current_field;
 		    sendStringToPeer(msg, peer);
+	    }
+	    else if (argv[1] == "kick" && argv.size() >= 3)
+	    {
+		    SoccerRoulette::get()->kickPlayer(argv[2], peer);
 	    }
 	    else
 	    {

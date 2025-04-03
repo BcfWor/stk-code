@@ -6,6 +6,7 @@
 #include <map>
 #include <thread>
 #include <atomic>
+#include <memory>
 
 class STKPeer;
 class NetworkPlayerProfile;
@@ -60,6 +61,7 @@ public:
     void resetFieldIndex();
     void calculateGameResult();
     std::string getLastGameResults();
+    void kickPlayer(const std::string& player_name, const std::shared_ptr<STKPeer>& kicker_peer);
 };
 
 #endif

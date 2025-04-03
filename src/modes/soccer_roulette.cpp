@@ -24,6 +24,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include "karts/controller/controller.hpp"
+#include "network/protocols/server_lobby.hpp"
 
 SoccerRoulette* SoccerRoulette::m_soccer_roulette = NULL;
 
@@ -708,5 +709,33 @@ void SoccerRoulette::calculateGameResult()
     {
         Log::error("SoccerRoulette", "Exception while calculating game results: %s", e.what());
     }
+}
+void SoccerRoulette::kickPlayer(const std::string& player_name, const std::shared_ptr<STKPeer>& kicker_peer)
+{
+    auto sl = LobbyProtocol::get<ServerLobby>();
+    if (!sl)
+    {
+        Log::error("SoccerRoulette", "ServerLobby not available");
+        return;
+    }
+    std::shared_ptr<STKPeer> player_peer = STKHost::get()->findPeerByName(
+        StringUtils::utf8ToWide(player_name), true/*ignoreCase*/, true/*prefixOnly*/);
+
+    if (player_name.empty() || !player_peer || player_peer->isAIPeer())
+    {
+        std::string error_msg = "Player '" + player_name + "' not found. Usage: /sr kick <player name>";
+        std::shared_ptr<STKPeer> kicker_peer_copy = kicker_peer;
+        sl->sendStringToPeer(error_msg, kicker_peer_copy);
+        return;
+    }
+    std::string kicker_name = StringUtils::wideToUtf8(kicker_peer->getPlayerProfiles()[0]->getName());
+    Log::info("SoccerRoulette", "Player %s kicked %s.",
+              kicker_name.c_str(), player_name.c_str());
+    std::string kick_msg = kicker_name + " kicked " + player_name;
+    sl->sendStringToAllPeers(kick_msg);
+    player_peer->kick();
+    std::string confirm_msg = "You kicked player '" + player_name + "'";
+    std::shared_ptr<STKPeer> kicker_peer_copy = kicker_peer;
+    sl->sendStringToPeer(confirm_msg, kicker_peer_copy);
 }
 
