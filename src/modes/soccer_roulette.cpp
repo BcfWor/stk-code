@@ -100,13 +100,11 @@ void SoccerRoulette::loadFieldsFromConfig()
 void SoccerRoulette::loadTeamsFromXML()
 {
     m_player_teams.clear();
-    
     if (ServerConfig::m_teams_xml_path.c_str()[0] == '\0')
     {
         Log::info("SoccerRoulette", "No XML path specified");
         return;
     }
-    
     try
     {
         // check if the file exists
@@ -116,7 +114,6 @@ void SoccerRoulette::loadTeamsFromXML()
                       ServerConfig::m_teams_xml_path.c_str());
             return;
         }
-        
         // load the file
         XMLNode* root = file_manager->createXMLTree(ServerConfig::m_teams_xml_path);
         if (!root || root->getName() != "teams")
@@ -125,7 +122,6 @@ void SoccerRoulette::loadTeamsFromXML()
             if (root) delete root;
             return;
         }
-        
         // process teams
         for (unsigned int i = 0; i < root->getNumNodes(); i++)
         {
@@ -141,15 +137,13 @@ void SoccerRoulette::loadTeamsFromXML()
                     continue;
                 std::string player;
                 player_node->get("name", &player);
-                
                 // store teams
                 m_player_teams[player] = team_name;
-                // log the teams to the console
+                // log the teams
                 Log::info("SoccerRoulette", "Team assignment: %s -> %s",
                           player.c_str(), team_name.c_str());
             }
-        }
-        
+        }	
         delete root;
         Log::info("SoccerRoulette", "Teams loaded from %s",
                   ServerConfig::m_teams_xml_path.c_str());
@@ -159,10 +153,7 @@ void SoccerRoulette::loadTeamsFromXML()
         Log::error("SoccerRoulette", "Error loading teams: %s", e.what());
     }
 }
-
 // -----------------------------------------------------------------------------
-// this is gonna be used if someone with at least REFEREE
-// rights uses /soccerroulette|sr reload
 void SoccerRoulette::reload()
 {
     m_current_field_index = 0;
@@ -206,6 +197,7 @@ std::string SoccerRoulette::getCurrentField() const
 }
 
 // -----------------------------------------------------------------------------
+// add field
 void SoccerRoulette::addField(const std::string& field)
 {
     if (std::find(m_fields.begin(), m_fields.end(), field) == m_fields.end())
@@ -553,7 +545,7 @@ void SoccerRoulette::calculateGameResult()
             Log::error("SoccerRoulette", "Failed to open goal history file for reading");
             return;
         }
-        std::ofstream output_file(output_file_path);
+        std::ofstream output_file(output_file_path, std::ios::app);
         if (!output_file.is_open())
         {
             Log::error("SoccerRoulette", "Failed to open results file for writing");
@@ -671,8 +663,7 @@ void SoccerRoulette::calculateGameResult()
                     blue_points += 3;
                 }
             }
-            
-            // Write JSON output
+            // write
             output_file << "{" << std::endl;
             output_file << "  \"timestamp\": \"" << game_timestamp << "\"," << std::endl;
             output_file << "  \"score\": {" << std::endl;
@@ -683,7 +674,6 @@ void SoccerRoulette::calculateGameResult()
             output_file << "    \"red\": " << red_points << "," << std::endl;
             output_file << "    \"blue\": " << blue_points << std::endl;
             output_file << "  }";
-            
             if (fastest_speed > 0)
             {
                 output_file << "," << std::endl;
@@ -700,7 +690,6 @@ void SoccerRoulette::calculateGameResult()
             
             output_file << "}" << std::endl;
         }
-        
         input_file.close();
         output_file.close();
         Log::info("SoccerRoulette", "Game results calculated and saved to JSON file");
@@ -737,5 +726,71 @@ void SoccerRoulette::kickPlayer(const std::string& player_name, const std::share
     std::string confirm_msg = "You kicked player '" + player_name + "'";
     std::shared_ptr<STKPeer> kicker_peer_copy = kicker_peer;
     sl->sendStringToPeer(confirm_msg, kicker_peer_copy);
+}
+// -----------------------------------------------------------------------------
+// Reassigns teams
+void SoccerRoulette::reassignTeams(const std::shared_ptr<STKPeer>& commander_peer)
+{
+    auto sl = LobbyProtocol::get<ServerLobby>();
+    if (!sl)
+    {
+        Log::error("SoccerRoulette", "ServerLobby not available for team reassignment");
+        return;
+    }
+    auto peers = STKHost::get()->getPeers();
+    int reassigned_count = 0;
+    for (auto& peer : peers)
+    {
+        if (!peer->isValidated() || peer->isAIPeer())
+            continue;   
+        for (auto& profile : peer->getPlayerProfiles())
+        {
+            std::string player_name = StringUtils::wideToUtf8(profile->getName());
+            KartTeam previous_team = profile->getTeam();
+            assignTeamToPlayer(profile.get());
+            // check if team changed
+            if (previous_team != profile->getTeam())
+            {
+                reassigned_count++;
+                std::string team_str;
+                switch (profile->getTeam())
+                {
+                    case KART_TEAM_RED:
+                        team_str = "red";
+                        break;
+                    case KART_TEAM_BLUE:
+                        team_str = "blue";
+                        break;
+                    default:
+                        team_str = "spectator";
+                        break;
+                }
+                Log::info("SoccerRoulette", "Reassigned player %s to team %s", 
+                          player_name.c_str(), team_str.c_str());
+            }
+        }
+    }
+    sl->updatePlayerList();
+    if (commander_peer)
+    {
+        std::string confirm_msg = "Reassigned teams";
+	sl->sendStringToAllPeers(confirm_msg);
+    }
+}
+// -----------------------------------------------------------------------------
+// Sets the game start timeout (not used for now)
+void SoccerRoulette::setRouletteTimeout(const std::shared_ptr<STKPeer>& commander_peer)
+{
+    auto sl = LobbyProtocol::get<ServerLobby>();
+    if (!sl)
+    {
+        return;
+    }
+    // 5min
+    const int TIME_OUT = 300;
+    sl->changeTimeout(TIME_OUT, false, true);
+    std::string confirm_msg = "Game start timeout set to 5 minutes";
+    sl->sendStringToAllPeers(confirm_msg);
+    Log::info("SoccerRoulette", "Game start timeout set to 5 minutes");
 }
 
