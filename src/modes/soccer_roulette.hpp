@@ -29,7 +29,6 @@ private:
     std::string m_minimap_server_ip;
     int m_minimap_server_port;
     void loadFieldsFromConfig();
-    void loadTeamsFromXML();
     void minimapExportThread();
     void exportMinimapData();
     SoccerRoulette();
@@ -62,6 +61,9 @@ public:
     void calculateGameResult();
     std::string getLastGameResults();
     void kickPlayer(const std::string& player_name, const std::shared_ptr<STKPeer>& kicker_peer);
+    void reassignTeams(const std::shared_ptr<STKPeer>& commander_peer);
+    void loadTeamsFromXML();
+    void setRouletteTimeout(const std::shared_ptr<STKPeer>& commander_peer);
 };
 
 #endif

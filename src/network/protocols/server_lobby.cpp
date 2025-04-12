@@ -10843,6 +10843,7 @@ unmute_error:
 	    }
 	    else if (argv[1] == "start")
 	    {
+		    //SoccerRoulette::get()->setRouletteTimeout(peer);
 		    std::string next_field = SoccerRoulette::get()->getNextField();
 		    bool success = forceSetTrack(next_field, 10, false, true, true);
 		    std::string msg;
@@ -10867,6 +10868,11 @@ unmute_error:
 	    else if (argv[1] == "kick" && argv.size() >= 3)
 	    {
 		    SoccerRoulette::get()->kickPlayer(argv[2], peer);
+	    }
+	    else if (argv[1] == "reassign" && argv[2] == "teams")
+	    {
+		    SoccerRoulette::get()->loadTeamsFromXML();
+		    SoccerRoulette::get()->reassignTeams(peer);
 	    }
 	    else
 	    {
@@ -12590,7 +12596,10 @@ void ServerLobby::changeTimeout(long timeout, bool infinite, bool absolute)
     STKHost::get()->sendPacketToAllPeers(server_info);
 
     // and also send the changing seconds notification
-    sendStringToAllPeers(msg);
+    if (!ServerConfig::m_soccer_roulette)
+    {
+	    sendStringToAllPeers(msg);
+    }
 }
 //-----------------------------------------------------------------------------
 void ServerLobby::onTournamentGameEnded()
