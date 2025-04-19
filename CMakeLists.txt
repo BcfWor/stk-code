@@ -118,6 +118,7 @@ endif()
 if(USE_ASAN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+    ADD_DEFINITIONS(-DASAN_STK)
 endif()
 if(USE_TSAN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fno-omit-frame-pointer")
@@ -833,6 +834,20 @@ if(MSVC OR MINGW)
   add_custom_target(stkshaders SOURCES ${STK_SHADERS})
 endif()
 
+if(MSVC)
+  SET(CMAKE_SHARED_LINKER_FLAGS /MANIFEST:NO)
+  add_custom_command(
+    TARGET supertuxkart POST_BUILD COMMAND "mt.exe" 
+    -manifest \"${PROJECT_SOURCE_DIR}\\windows\\dpi_aware.manifest\" 
+    -inputresource:\"$<TARGET_FILE:supertuxkart>\"\;\#1
+    -outputresource:\"$<TARGET_FILE:supertuxkart>\"\;\#1)
+endif()
+
+if(MINGW)
+  SET(CMAKE_SHARED_LINKER_FLAGS /MANIFEST:NO)
+  target_sources(supertuxkart PRIVATE windows/windows_config.rc)
+endif()
+
 if(MINGW)
     target_link_libraries(supertuxkart -ldxguid -ldnsapi)
     if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
@@ -910,7 +925,7 @@ install(FILES data/supertuxkart_128.png DESTINATION share/icons/hicolor/128x128/
 install(FILES data/supertuxkart_256.png DESTINATION share/icons/hicolor/256x256/apps RENAME supertuxkart.png)
 install(FILES data/supertuxkart_512.png DESTINATION share/icons/hicolor/512x512/apps RENAME supertuxkart.png)
 install(FILES data/supertuxkart_1024.png DESTINATION share/icons/hicolor/1024x1024/apps RENAME supertuxkart.png)
-install(FILES data/supertuxkart.appdata.xml DESTINATION share/metainfo)
+install(FILES data/net.supertuxkart.SuperTuxKart.metainfo.xml DESTINATION share/metainfo)
 
 if(MINGW)
     install(DIRECTORY ${CMAKE_BINARY_DIR}/bin/ DESTINATION ${STK_INSTALL_BINARY_DIR}
