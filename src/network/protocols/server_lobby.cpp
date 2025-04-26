@@ -9605,8 +9605,8 @@ unmute_error:
 			    iss >> name >> games >> team_size >> goals_per_game >> win_rate >> elo;
 			    if (name == username)
 			    {
-                                    player_vec.push_back(std::pair<std::string, int>(username, elo));
-                                    found = true;
+				    player_vec.push_back(std::pair<std::string, int>(username, elo));
+				    found = true;
 				    break;
 			    }
 		    }
@@ -9619,10 +9619,24 @@ unmute_error:
 	}
         int min = 0;
         std::vector <std::pair<std::string, int>> player_copy = player_vec;
+        if (player_vec.size() % 2 == 1)  // in this case the number of players in uneven. In this case ignore the worst noob.
+        {
+            for (int i3 = 0; i3 < player_copy.size(); i3++)
+            {
+                if (player_copy[i3].second <= player_copy[min].second)
+                {
+                    min = i3;
+                }
+            }
+            player_copy.erase(player_copy.begin() + min);
+            int min_idx = std::min(min, (int)player_vec.size() - 1);
+            msg = "Player " + player_vec[min_idx].first + " has minimal ELO.";
+            Log::info("ServerLobby", msg.c_str());
+        }
         auto teams = createBalancedTeams(player_copy);
         soccer_ranked_make_teams(teams, min, player_vec);
         updatePlayerList();
-        std::string message = "Teams have been generated automatically using the new formula! If teams seem unbalanced, please report it with /bug";
+        std::string message = "Teams have been generated automatically!";
         sendStringToAllPeers(message);
     }
     else if (argv[0] == "goal" && argv[1] == "history")
@@ -9683,6 +9697,7 @@ unmute_error:
 	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
 	    log << "/end is used";
 	    log.close();
+	    Log::verbose("ServerLobby", "/end log");
 	}
         STKHost::get()->sendPacketToAllPeersWith([](STKPeer* p)
             {
