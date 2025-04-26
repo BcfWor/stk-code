@@ -114,6 +114,21 @@ public:
                                  // Specified in the configuration file.
     };
 private:
+    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_a;
+    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_b;
+    int m_min_player_idx;
+    std::vector<std::pair<std::string, int>> m_player_vec;
+    int m_team_selection_votes_a;
+    int m_team_selection_votes_b;
+    std::set<uint32_t> m_team_selection_voted_peers;
+    bool m_team_selection_vote_active;
+    uint64_t m_team_selection_vote_timer;
+    void startTeamSelectionVote();
+    void handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote);
+    void applyTeamSelection(bool select_option_a);
+    void checkTeamSelectionVoteTimeout();
+    std::pair<std::vector<std::string>, std::vector<std::string>> createAlternativeTeams(
+        const std::vector<std::pair<std::string, int>>& players); 
     bool checkXmlEmoji(const std::string& username) const;
     bool checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer);
     bool m_random_karts_enabled;

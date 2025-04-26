@@ -1267,7 +1267,7 @@ void ServerLobby::pollDatabase()
     if (!ServerConfig::m_sql_management || !m_db)
         return;
 
-    if (StkTime::getMonoTimeMs() < m_last_poll_db_time + 60000)
+    if (StkTime::getMonoTimeMs() < m_last_poll_db_time + 30000)
         return;
 
     m_last_poll_db_time = StkTime::getMonoTimeMs();
@@ -2631,6 +2631,10 @@ void ServerLobby::update(int ticks)
         m_state.load() <= RACING && m_server_has_loaded_world.load();
     bool all_players_in_world_disconnected = (w != NULL && world_started);
     int sec = ServerConfig::m_kick_idle_player_seconds;
+    if (m_state.load() == WAITING_FOR_START_GAME)
+    {
+	    checkTeamSelectionVoteTimeout();
+    }
     if (world_started)
     {
         for (unsigned i = 0; i < RaceManager::get()->getNumPlayers(); i++)
@@ -9633,11 +9637,75 @@ unmute_error:
             msg = "Player " + player_vec[min_idx].first + " has minimal ELO.";
             Log::info("ServerLobby", msg.c_str());
         }
-        auto teams = createBalancedTeams(player_copy);
-        soccer_ranked_make_teams(teams, min, player_vec);
-        updatePlayerList();
-        std::string message = "Teams have been generated automatically!";
-        sendStringToAllPeers(message);
+	m_team_option_a = createBalancedTeams(player_copy);
+	m_team_option_b = createAlternativeTeams(player_copy);
+	m_min_player_idx = min;
+	m_player_vec = player_vec;
+	std::stringstream team_display;
+	team_display << "Proposed Team Options:\n\n";
+	team_display << "Team Option A:\n";
+	team_display << "Red Team: ";
+	for (size_t i = 0; i < m_team_option_a.first.size(); i++) 
+	{
+		std::string display_name = m_team_option_a.first[i];
+		if (display_name.length() > 10) 
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_a.first.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\nBlue Team: ";
+	for (size_t i = 0; i < m_team_option_a.second.size(); i++) 
+	{
+		std::string display_name = m_team_option_a.second[i];
+		if (display_name.length() > 10)
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_a.second.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\n\nTeam Option B:\n";
+	team_display << "Red Team: ";
+	for (size_t i = 0; i < m_team_option_b.first.size(); i++) 
+	{
+		std::string display_name = m_team_option_b.first[i];
+		if (display_name.length() > 10) 
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_b.first.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\nBlue Team: ";
+	for (size_t i = 0; i < m_team_option_b.second.size(); i++)
+	{
+		std::string display_name = m_team_option_b.second[i];
+		if (display_name.length() > 10)
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_b.second.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\n\nVote with /a for Team Option A or /b for Team Option B.";
+	changeTimeout(60, false, false);
+        startTeamSelectionVote();
+	std::string team_display_str = team_display.str();
+	sendStringToAllPeers(team_display_str);
     }
     else if (argv[0] == "goal" && argv[1] == "history")
     {
@@ -9656,6 +9724,22 @@ unmute_error:
 		    GoalHistory::showTeamGoalHistory(peer, 1);
 	    }
 	    return;
+    }
+    else if (argv[0] == "a")
+    {
+	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    handleTeamSelectionVote(peer, "a");
+		    return;
+	    }
+    }
+    else if (argv[0] == "b")
+    {
+	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    handleTeamSelectionVote(peer, "b");
+		    return;
+	    }
     }
     else if (argv[0] == "end" || argv[0] == "lobby")
     {
@@ -12935,3 +13019,130 @@ bool ServerLobby::checkXmlEmoji(const std::string& username) const
     delete root;
     return false;
 }
+// -- 
+void ServerLobby::startTeamSelectionVote()
+{
+    m_team_selection_votes_a = 0;
+    m_team_selection_votes_b = 0;
+    m_team_selection_voted_peers.clear();
+    m_team_selection_vote_active = true;
+    // timer
+    m_team_selection_vote_timer = StkTime::getMonoTimeMs() + 60000;
+}
+void ServerLobby::handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote)
+{
+    if (!m_team_selection_vote_active)
+    {
+        std::string msg = "No team selection vote is currently active.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+    if (m_team_selection_voted_peers.find(peer->getHostId()) != m_team_selection_voted_peers.end())
+    {
+        std::string msg = "You have already voted for team selection.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+    if (vote == "a")
+    {
+        m_team_selection_votes_a++;
+        m_team_selection_voted_peers.insert(peer->getHostId());
+        std::string msg = "You voted for Team Option A.";
+        sendStringToPeer(msg, peer);
+    }
+    else if (vote == "b")
+    {
+        m_team_selection_votes_b++;
+        m_team_selection_voted_peers.insert(peer->getHostId());
+        std::string msg = "You voted for Team Option B.";
+        sendStringToPeer(msg, peer);
+    }
+    int total_players = STKHost::get()->getPeers().size();
+    int required_votes = std::max(2, total_players / 2 + 1);
+    
+    if (m_team_selection_votes_a >= required_votes)
+    {
+        applyTeamSelection(true);
+        m_team_selection_vote_active = false;
+        std::string msg = "Vote complete! Applying Team Option A.";
+        sendStringToAllPeers(msg);
+    }
+    else if (m_team_selection_votes_b >= required_votes)
+    {
+        applyTeamSelection(false);
+        m_team_selection_vote_active = false;
+        std::string msg = "Vote complete! Applying Team Option B.";
+        sendStringToAllPeers(msg);
+    }
+    else
+    {
+        std::string msg = "Team selection vote: " + std::to_string(m_team_selection_votes_a) +
+		" for Option A, " + std::to_string(m_team_selection_votes_b) +
+		" for Option B. ";
+	sendStringToAllPeers(msg);
+    }
+}
+void ServerLobby::applyTeamSelection(bool select_option_a)
+{
+    if (select_option_a)
+    {
+        soccer_ranked_make_teams(m_team_option_a, m_min_player_idx, m_player_vec);
+    }
+    else
+    {
+        soccer_ranked_make_teams(m_team_option_b, m_min_player_idx, m_player_vec);
+    }
+    updatePlayerList();
+}
+void ServerLobby::checkTeamSelectionVoteTimeout()
+{
+    if (m_team_selection_vote_active && StkTime::getMonoTimeMs() > m_team_selection_vote_timer)
+    {
+        m_team_selection_vote_active = false;
+        if (m_team_selection_votes_a > m_team_selection_votes_b)
+        {
+            applyTeamSelection(true);
+            std::string msg = "Vote time expired! Applying Team Option A based on majority vote.";
+            sendStringToAllPeers(msg);
+        }
+        else if (m_team_selection_votes_b > m_team_selection_votes_a)
+        {
+            applyTeamSelection(false);
+            std::string msg = "Vote time expired! Applying Team Option B based on majority vote.";
+            sendStringToAllPeers(msg);
+        }
+        else
+        {
+            // random
+            bool select_a = (rand() % 2 == 0);
+            applyTeamSelection(select_a);
+            std::string msg = "Vote time expired with a tie! Randomly selected " + 
+                              std::string(select_a ? "Team Option A" : "Team Option B") + ".";
+            sendStringToAllPeers(msg);
+        }
+    }
+}
+std::pair<std::vector<std::string>, std::vector<std::string>> ServerLobby::createAlternativeTeams(
+    const std::vector<std::pair<std::string, int>>& players)
+{
+    std::vector<std::string> red_team, blue_team;
+    std::vector<std::pair<std::string, int>> sorted_players = players;
+    std::sort(sorted_players.begin(), sorted_players.end(), 
+        [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) 
+	{
+            return a.second > b.second;
+        });
+    for (size_t i = 0; i < sorted_players.size(); i++)
+    {
+        if (i % 4 == 0 || i % 4 == 3) 
+	{
+            red_team.push_back(sorted_players[i].first);
+        }
+	else 
+	{
+            blue_team.push_back(sorted_players[i].first);
+        }
+    }
+    return std::make_pair(red_team, blue_team);
+}
+
