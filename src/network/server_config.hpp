@@ -289,6 +289,10 @@ namespace ServerConfig
     SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
 	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_jumble_wordlist_path
+	    SERVER_CFG_DEFAULT(StringServerConfigParam("wordlist.txt", "jumble-wordlist-path",
+	    "Path to the word list file for jumble"));
+
     SERVER_CFG_PREFIX BoolServerConfigParam m_wan_server
         SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "wan-server",
         "Enable wan server, which requires you to have an stk-addons account "

@@ -38,6 +38,10 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <fstream>
+#include <locale>
+#include <random>
+
 
 #ifdef ENABLE_SQLITE3
 #include <sqlite3.h>
@@ -114,6 +118,34 @@ public:
                                  // Specified in the configuration file.
     };
 private:
+    std::vector<std::string> m_jumble_word_list;
+    std::map<uint32_t, std::string> m_jumble_player_words;
+    std::map<uint32_t, std::string> m_jumble_player_jumbled;
+    std::map<uint32_t, uint64_t> m_jumble_player_start_time;
+    uint64_t m_jumble_last_event_time;
+    std::mt19937 m_jumble_rng;
+    std::mutex m_jumble_mutex;
+    void loadJumbleWordList();
+    std::string jumbleWord(const std::string& word);
+    void startJumbleForPlayer(uint32_t player_id);
+    void endJumbleForPlayer(uint32_t player_id, bool won);
+    void updateJumbleTimer();
+    void handleJumbleCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
+    struct RPSChallenge
+    {
+	    uint32_t challenger_id;
+	    uint32_t challenged_id;
+	    std::string challenger_name;
+	    std::string challenged_name;
+	    std::string challenger_choice;
+	    std::string challenged_choice;
+	    uint64_t timeout;
+	    bool accepted;
+    };
+    std::vector<RPSChallenge> m_rps_challenges;
+    void handleRPSCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
+    void checkRPSTimeouts();
+    void determineRPSWinner(RPSChallenge& challenge);
     std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_a;
     std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_b;
     int m_min_player_idx;
