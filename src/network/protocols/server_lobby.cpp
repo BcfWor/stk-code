@@ -7248,6 +7248,7 @@ void ServerLobby::handleServerCommand(Event* event,
             return;
         }
         changeTimeout(amount_sec, false, false);
+	sendRandomInstalladdonLine(peer);
     }
     else if (argv[0] == "score" || argv[0] == "sc")
     {
@@ -8871,7 +8872,7 @@ unmute_error:
             	"/to|msg|dm|pm, /slots|sl, /public|pub|all,"
             	"/listserveraddon|lsa, /playerhasaddon|psa, /kick, /playeraddonscore|psa, /serverhasaddon|sha, /inform|ifm"
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
-            	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date" 
+            	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date|time" 
             	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
                 "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
         );
@@ -8918,14 +8919,74 @@ unmute_error:
 
         setPoleEnabled(state);
     }
-    else if (argv[0] == "date")
+ 
+    else if (argv[0] == "date" || argv[0] == "time")
     {
-	    time_t now = time(0);
-	    char buffer[128];
-	    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", localtime(&now));
-	    std::string dt(buffer);
-	    sendStringToPeer(dt, peer);
-	    return;
+	   const std::unordered_map<std::string, double> TZ_OFFSETS = {
+		  // America (DST and Std.)
+          {"EST", -5}, {"EDT", -4},
+          {"CST", -6}, {"CDT", -5},
+          {"MST", -7}, {"MDT", -6},
+          {"PST", -8}, {"PDT", -7},
+          
+          // europe (DST and Std.)
+          {"GMT",0}, {"BST",1},
+          {"CET",1}, {"CEST",2},
+          {"EET",2}, {"EEST",3},
+          
+          // countries
+          {"BR", -3},
+          {"IN", 5.5},
+          {"AR", -3},
+          {"CH", 8},
+          {"FR", 1},
+          {"IT", 1},
+          {"RU", 3},
+          {"ES", 1},
+          {"PL", 1},
+          {"MX", -6},
+          {"NL", 1},
+          {"CA", -5},
+          {"DE", 1},
+          {"US", -5},
+          {"JP", 9}
+	   };
+
+	   if (argv.size() < 2)
+	   { 
+		   std::string usage_msg = "Usage: /date (TIMEZONE/DST_TIMEZONE) "
+           "(e.g. Standard time: /date UTC, /date IN, /date DE)"
+           "Daylight time: /date BST, /date CEST, /date PDT";
+		   sendStringToPeer(usage_msg, peer);
+		   return;
+	   }
+	   // Use argv[1] as timezone
+	   std::string tz = argv[1];
+	   std::transform(tz.begin(), tz.end(), tz.begin(), ::toupper);
+	   auto it = TZ_OFFSETS.find(tz);
+	   if (it != TZ_OFFSETS.end())
+	   {
+		   // get time from server
+		   time_t now = time(nullptr);
+		   now += it->second * 3600;
+		   tm *gmtm = gmtime(&now);
+		   char buffer[256];
+		   strftime(buffer, sizeof(buffer), "%H:%M:%S UTC%z | %a, %d-%m-%Y", gmtm);
+		   std::string time_msg = "[TIME]: " + std::string(buffer);
+		   // send msg
+		   sendStringToPeer(time_msg, peer);
+		   return;
+	   }
+	   else
+	   {
+		   std::string valid_tz;
+		   for (const auto& pair : TZ_OFFSETS)
+			   valid_tz += pair.first + " ";
+		   std::string error = " Invalid timezone or country code. \n"
+			   "Valid codes: " + valid_tz;
+		   sendStringToPeer(error, peer);
+		   return;
+	   }
     }
 
     // MODERATION TOOLKIT
@@ -9044,6 +9105,12 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
+        else if (argv[1] == "date")
+        {
+            std::string msg = "Date/Time provides current time and date according to user defined time zone or country code.";
+            sendStringToPeer(msg, peer);
+            return;
+        }
         else if (argv[1] == "cakeparty")
         {
             std::string msg = "Cakeparty on ensures (with enough votes) that there will be a game where the bonus boxes are filled with cakes.";
@@ -9064,7 +9131,7 @@ unmute_error:
         }
         else if (argv[1] == "ranking")
         {
-            std::string msg = "To check your rank, go to: https://www.tierchester.eu/ranking or use /rank10 /rank /top.";
+            std::string msg = "To check your rank, go to: https://www.tiersservers.eu/ranking or use /rank10 /rank /top.";
             sendStringToPeer(msg, peer);
             return;
         }
@@ -9084,7 +9151,7 @@ unmute_error:
         }
       else if (argv[1] == "ranking")
 	{
-		std::string msg= "To check your rank, go to: https://www.tierchester.eu/ranking or use /rank10 /rank /top.";
+		std::string msg= "To check your rank, go to: https://www.tiersservers.eu/ranking or use /rank10 /rank /top.";
 		sendStringToPeer(msg, peer);
 		return;
 	}
@@ -10808,6 +10875,7 @@ void ServerLobby::setPoleEnabled(bool mode)
     if (mode)
     {
         resetPeersReady();
+	updatePlayerList();
 
         std::vector<std::shared_ptr<NetworkPlayerProfile>>
             team_blue, team_red;
