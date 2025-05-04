@@ -8995,34 +8995,39 @@ unmute_error:
 	   auto it = TZ_OFFSETS.find(tz);
 	   if (it != TZ_OFFSETS.end())
 	   {
-		   // get time from server
-		    time_t now = time(nullptr);
-            tm *gmtm = gmtime(&now);
-            // apply manually
-            int hours_offset = static_cast<int>(it->second);
-            int minutes_offset = static_cast<int>((it->second - hours_offset) * 60);
+	   // get time from server
+	   time_t now = time(nullptr);
+           tm *gmtm = gmtime(&now);
+           // apply manually
+           int hours_offset = static_cast<int>(it->second);
+           int minutes_offset = static_cast<int>((it->second - hours_offset) * 60);
 
-            gmtm->tm_hour += hours_offset;
-            gmtm->tm_min += minutes_offset;
-            time_t adjusted mktime(gmtm);
-            gmtm = gmtime(&adjusted);
-            char buffer [256]
-            // indicator string
-            char tz_indicator[10];
-            snprintf(tz_indicator, sizeof(tz_indicator), "UTW%+d:%02d",
-                    hours_offset, abs(minutes_offset));
-            strftime(buffer, sizeof(buffer), "%H:%m:%S | %a, %d-%m-%Y", gmtm);
-            std::string time_msg = "TIME " + tz + " (" + tz_indicator + ")] " + std::string(buffer);
-            // send msg
-		   sendStringToPeer(time_msg, peer);
-		   return;
+           gmtm->tm_hour += hours_offset;
+           gmtm->tm_min += minutes_offset;
+           time_t adjusted = mktime(gmtm);
+           gmtm = gmtime(&adjusted);
+           char buffer[256];
+           // indicator string
+           char tz_indicator[10];
+           snprintf(tz_indicator, sizeof(tz_indicator), "UTC%+d:%02d", hours_offset, abs(minutes_offset));
+
+           strftime(buffer, sizeof(buffer), "%H:%M:%S | %a, %d-%m-%Y", gmtm);
+           std::string time_msg = "[TIME] " + tz + " (" + tz_indicator + ") " + std::string(buffer);
+           // send msg
+		  sendStringToPeer(time_msg, peer);
+		  return;
 	   }
 	   else
 	   {
 		   std::string valid_tz;
-		   for (const auto& pair : TZ_OFFSETS)
-			   valid_tz += pair.first + " ";
-		   std::string error = " Invalid timezone or country code. \n"
+		   for (const auto& pair : TZ_OFFSETS) {
+			   valid_tz += pair.first + ", ";
+		   }
+		   //remove ending comma and space
+		   if (!valid_tz.empty()) {
+			   valid_tz.erase(valid_tz.size() - 2);
+		   }
+		   std::string error = "Invalid timezone or country code. \n"
 			   "Valid codes: " + valid_tz;
 		   sendStringToPeer(error, peer);
 		   return;
