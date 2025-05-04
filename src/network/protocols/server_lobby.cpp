@@ -67,8 +67,6 @@
 #include "utils/random_generator.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/time.hpp"
-//#include "utils/translation.hpp"
-//#include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <algorithm>
 #include <cassert>
@@ -10051,7 +10049,7 @@ unmute_error:
         if (argv.size() < 2)
         {
             std::string msg = isField ? "Format: /setfield soccer_field_id [minutes],[randomitems:on/off]" :
-                "Format: /settrack track_id [laps],[reverse:on/off]";
+                "Format: /settrack track_id [laps/- reverse:on/off]";
             sendStringToPeer(msg, peer);
             return;
         }
