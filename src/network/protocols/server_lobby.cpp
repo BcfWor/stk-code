@@ -67,8 +67,6 @@
 #include "utils/random_generator.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/time.hpp"
-//#include "utils/translation.hpp"
-#include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <algorithm>
 #include <cassert>
@@ -8870,7 +8868,7 @@ unmute_error:
             	"/showcommands|commands|cmds|cmd, /vote, /spectate|s|sp|spec|spect, /addtime|addt"
             	" /score|sc, /teamchat|tc|tchat, /redteam|redt|rt, /blueteam|bluet|bt "
             	"/to|msg|dm|pm, /slots|sl, /public|pub|all,"
-            	"/listserveraddon|lsa, /playerhasaddon|psa, /kick, /playeraddonscore|psa, /serverhasaddon|sha, /inform|ifm"
+            	"/listserveraddon|lsa, /playerhasaddon|pha, /kick, /playeraddonscore|pas, /serverhasaddon|sha, /inform|ifm"
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
             	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date|time" 
             	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
@@ -8928,11 +8926,30 @@ unmute_error:
           {"CST", -6}, {"CDT", -5},
           {"MST", -7}, {"MDT", -6},
           {"PST", -8}, {"PDT", -7},
+          {"AKST", -9}, {"AKDT", -8},
+          {"HST", -10}, {"HDT", -9},
           
           // europe (DST and Std.)
           {"GMT",0}, {"BST",1},
           {"CET",1}, {"CEST",2},
           {"EET",2}, {"EEST",3},
+          {"WET", 0}, {"WEST", 1},
+          {"MSK", 3},
+
+          // Asia
+          {"AFT", 4.5},
+          {"IST", 5.5},
+          {"PKT", 5},
+          {"IRST", 3.5 }, { "IRDT", 4.5 },
+          {"CST", 8},
+          {"CDT", 8},
+          {"JST", 9},
+          {"KST", 9},
+          {"SGT", 8},
+          {"ICT", 7},
+          {"MST", 5.5},
+          {"PST", 8},
+          {"LKT", 5.5},
           
           // countries
           {"BR", -3},
@@ -8949,13 +8966,25 @@ unmute_error:
           {"CA", -5},
           {"DE", 1},
           {"US", -5},
-          {"JP", 9}
+          {"JP", 9},
+          {"GB", 0},
+          {"AU", 10},
+          {"ZA", 2},
+          {"KR", 9},
+          {"EG", 2},
+          {"NG", 1},
+          {"TR", 3},
+          {"SE", 1},
+          {"FI", 2},
+          {"BE", 1},
+          {"PT", 0},
+          {"DK", 1} 
 	   };
 
 	   if (argv.size() < 2)
 	   { 
-		   std::string usage_msg = "Usage: /date (TIMEZONE/DST_TIMEZONE) "
-           "(e.g. Standard time: /date UTC, /date IN, /date DE)"
+		   std::string usage_msg = "Usage: /date (TIMEZONE/DST_TIMEZONE)\n"
+           "(e.g. Standard time: /date UTC, /date IN, /date DE)\n"
            "Daylight time: /date BST, /date CEST, /date PDT";
 		   sendStringToPeer(usage_msg, peer);
 		   return;
@@ -8966,23 +8995,39 @@ unmute_error:
 	   auto it = TZ_OFFSETS.find(tz);
 	   if (it != TZ_OFFSETS.end())
 	   {
-		   // get time from server
-		   time_t now = time(nullptr);
-		   now += it->second * 3600;
-		   tm *gmtm = gmtime(&now);
-		   char buffer[256];
-		   strftime(buffer, sizeof(buffer), "%H:%M:%S UTC%z | %a, %d-%m-%Y", gmtm);
-		   std::string time_msg = "[TIME]: " + std::string(buffer);
-		   // send msg
-		   sendStringToPeer(time_msg, peer);
-		   return;
+	   // get time from server
+	   time_t now = time(nullptr);
+           tm *gmtm = gmtime(&now);
+           // apply manually
+           int hours_offset = static_cast<int>(it->second);
+           int minutes_offset = static_cast<int>((it->second - hours_offset) * 60);
+
+           gmtm->tm_hour += hours_offset;
+           gmtm->tm_min += minutes_offset;
+           time_t adjusted = mktime(gmtm);
+           gmtm = gmtime(&adjusted);
+           char buffer[256];
+           // indicator string
+           char tz_indicator[10];
+           snprintf(tz_indicator, sizeof(tz_indicator), "UTC%+d:%02d", hours_offset, abs(minutes_offset));
+
+           strftime(buffer, sizeof(buffer), "%H:%M:%S | %a, %d-%m-%Y", gmtm);
+           std::string time_msg = "[TIME] " + tz + " (" + tz_indicator + ") " + std::string(buffer);
+           // send msg
+		  sendStringToPeer(time_msg, peer);
+		  return;
 	   }
 	   else
 	   {
 		   std::string valid_tz;
-		   for (const auto& pair : TZ_OFFSETS)
-			   valid_tz += pair.first + " ";
-		   std::string error = " Invalid timezone or country code. \n"
+		   for (const auto& pair : TZ_OFFSETS) {
+			   valid_tz += pair.first + ", ";
+		   }
+		   //remove ending comma and space
+		   if (!valid_tz.empty()) {
+			   valid_tz.erase(valid_tz.size() - 2);
+		   }
+		   std::string error = "Invalid timezone or country code. \n"
 			   "Valid codes: " + valid_tz;
 		   sendStringToPeer(error, peer);
 		   return;
@@ -10008,7 +10053,7 @@ unmute_error:
 
         if (argv.size() < 2)
         {
-            std::string msg = isField ? "Format: /setfield soccer_field_id [minutes/- scatter:on/off]" :
+            std::string msg = isField ? "Format: /setfield soccer_field_id [minutes],[randomitems:on/off]" :
                 "Format: /settrack track_id [laps/- reverse:on/off]";
             sendStringToPeer(msg, peer);
             return;
