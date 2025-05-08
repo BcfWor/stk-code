@@ -118,24 +118,6 @@ public:
                                  // Specified in the configuration file.
     };
 private:
-    struct HangmanGame 
-    {
-        std::string word;
-        std::set<char> guessed_letters;
-        int wrong_guesses;
-        uint32_t player1_id;
-        uint32_t player2_id;
-        bool accepted;
-        uint32_t current_turn;
-    };
-    std::map<uint32_t, HangmanGame> m_hangman_games;
-    void handleHangmanCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
-    void startHangmanGame(uint32_t player1_id, uint32_t player2_id);
-    void processHangmanGuess(uint32_t player_id, char guess);
-    std::string getHangmanDisplay(const HangmanGame& game);
-    std::string getWordDisplay(const HangmanGame& game);
-    std::string getHangmanArt(int wrong_guesses);
-    std::shared_ptr<STKPeer> getPeerByPlayerName(const std::string& name);
     std::vector<std::string> m_jumble_word_list;
     std::map<uint32_t, std::string> m_jumble_player_words;
     std::map<uint32_t, std::string> m_jumble_player_jumbled;
