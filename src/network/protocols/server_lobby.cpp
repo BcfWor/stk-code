@@ -135,6 +135,36 @@ public:
 };   // UpdatePlayerRankingRequest
 // ========================================================================
 
+class STKSeenRequest : public Online::XMLRequest {
+    private:
+    std::string addr = ServerConfig::m_ishigami_address;
+    public:
+
+    bool success = false;
+    std::string username;
+    std::string country_code;
+    std::string date;
+    std::string server_name;
+    std::string server_country;
+
+    STKSeenRequest(const std::string& username) : XMLRequest(Online::RequestManager::HTTP_MAX_PRIORITY) {
+        setURL(addr + "/stk-seen");
+        addParameter("username", username);
+    };
+    virtual void afterOperation() {
+        Online::XMLRequest::afterOperation();
+        const XMLNode* result = getXMLData();
+
+        if (!isSuccess()) {
+            Log::error("Ishigami", "Failed to get the STK Seen data.");
+        };
+        
+        success = true;
+    }
+};
+
+// ========================================================================
+
 // We use max priority for all server requests to avoid downloading of addons
 // icons blocking the poll request in all-in-one graphical client server
 
@@ -8872,7 +8902,7 @@ unmute_error:
             	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
             	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date|time" 
             	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
-                "/setowner /setmode /setdifficulty /setgoaltarget, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
+                "/setowner /setmode /setdifficulty /setgoaltarget, /stk-seen|seen, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
         );
 	    sendStringToPeer(msg, peer);
         return;
@@ -8917,7 +8947,73 @@ unmute_error:
 
         setPoleEnabled(state);
     }
- 
+    else if (ServerConfig::m_ishigami_enabled && (argv[0] == "stk-seen" || argv[0] == "seen"))
+    {
+        if (argv.size() < 2)
+        {
+            std::string msg = "Usage: /stk-seen|seen <playername>";
+            sendStringToPeer(msg, peer);
+            return;
+        };
+
+        std::string msg = "Checking player data...";
+	sendStringToPeer(msg, peer);
+	std::thread([this, &peer, player_name = argv[1]]() {
+		auto request = std::make_shared<STKSeenRequest>(player_name);
+		Online::RequestManager::get()->addRequest(request);
+
+		while (!request->isDone())
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+		const XMLNode* xml = request->getXMLData();
+		if (request->isSuccess())
+		{
+			if (xml)
+			{
+				std::string username, country, server, server_country, date;
+				xml->get("username", &username);
+				xml->get("country", &country);
+				xml->get("server", &server);
+				xml->get("server-country", &server_country);
+				xml->get("date", &date);
+
+				std::string result = StringUtils::insertValues(
+					("Player %s (%s) was last seen on server %s (%s) at %s"),
+					username.c_str(), country.c_str(), server.c_str(),
+					server_country.c_str(), date.c_str());
+				sendStringToPeer(result, peer);
+			}
+		}
+		else
+		{
+			std::string api_reason;
+			std::string reason;
+
+			if (xml)
+				xml->get("info", &api_reason);
+			
+			if (api_reason == "player_not_seen")
+            {
+				reason = StringUtils::insertValues("Player %s has not been seen on any server recently.", player_name);
+            }
+            else if (api_reason == "name_too_short")
+            {
+				reason = "Username must be at least 3 characters";
+            }
+			else if (api_reason == "sql_error")
+            {
+				reason = "SQL query failed. Please contact the administrator";
+            }
+			else
+            {
+				reason = "Unspecified error";
+            }
+
+			std::string error_msg = StringUtils::insertValues(("Failed to get player data: %s"), reason.c_str());
+			sendStringToPeer(error_msg, peer);
+		}
+	}).detach();
+    }
     else if (argv[0] == "date" || argv[0] == "time")
     {
 	   const std::unordered_map<std::string, double> TZ_OFFSETS = {

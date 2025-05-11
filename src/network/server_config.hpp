@@ -677,6 +677,15 @@ namespace ServerConfig
         "administrator. Note that the server owner basically has infinite "
         "permission level."));
 
+    SERVER_CFG_PREFIX BoolServerConfigParam m_ishigami_enabled
+        SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "ishigami",
+        "Enable linaSTK's stk-seen feature. Requires the ishigami server "
+        "and linaSTK to be installed and running on local or remote server."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_ishigami_address
+        SERVER_CFG_DEFAULT(StringServerConfigParam("http://127.0.0.1:8000", "ishigami-address",
+        "Address of the ishigami server."));
+
     SERVER_CFG_PREFIX StringServerConfigParam m_restrictions_table
         SERVER_CFG_DEFAULT(StringServerConfigParam("restrictions",
         "restrictions-table",
