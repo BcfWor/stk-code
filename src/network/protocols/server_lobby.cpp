@@ -140,13 +140,6 @@ class STKSeenRequest : public Online::XMLRequest {
     std::string addr = ServerConfig::m_ishigami_address;
     public:
 
-    bool success = false;
-    std::string username;
-    std::string country_code;
-    std::string date;
-    std::string server_name;
-    std::string server_country;
-
     STKSeenRequest(const std::string& username) : XMLRequest(Online::RequestManager::HTTP_MAX_PRIORITY) {
         setURL(addr + "/stk-seen");
         addParameter("username", username);
@@ -158,8 +151,6 @@ class STKSeenRequest : public Online::XMLRequest {
         if (!isSuccess()) {
             Log::error("Ishigami", "Failed to get the STK Seen data.");
         };
-        
-        success = true;
     }
 };
 
