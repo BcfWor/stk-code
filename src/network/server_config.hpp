@@ -269,7 +269,10 @@ namespace ServerConfig
 	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
 
     SERVER_CFG_PREFIX StringServerConfigParam m_ranked_script_path
-	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.py", "ranked-script-path", "File path to the ranking Python script."));   
+	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.py", "ranked-script-path", "File path to the ranking Python script."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_update_script_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("update.py", "update-script-path", "File path to the update script."));   
 
     SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
 	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
