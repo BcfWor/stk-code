@@ -262,7 +262,6 @@ extern "C" {
 #include "network/socket_address.hpp"
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
-#include "network/tournament/tournament_manager.hpp"
 #include "online/profile_manager.hpp"
 #include "online/request_manager.hpp"
 #include "race/grand_prix_manager.hpp"
@@ -1476,18 +1475,6 @@ int handleCmdLine(bool has_server_config, bool has_parent_process)
 
     if (NetworkConfig::get()->isServer())
     {
-        // Load TournamentManager when supertournament is enabled.
-        if (ServerConfig::m_supertournament)
-        {
-            TournamentManager::create();
-            TournamentManager::get()->LoadGamePlan();
-            TournamentManager::get()->LoadMatchPlan();
-            TournamentManager::get()->LoadRequiredFields();
-            TournamentManager::get()->LoadSemiRequiredFields();
-            TournamentManager::get()->InitializePlayersAndTeams(
-                    ServerConfig::m_red_team,
-                    ServerConfig::m_blue_team);
-        }
         PlayerManager::get()->enforceCurrentPlayer();
         const std::string& server_name = ServerConfig::m_server_name;
         if (ServerConfig::m_wan_server)
@@ -1840,7 +1827,6 @@ void clearGlobalVariables()
 {
     // In android sometimes global variables is not reset when restart the app
     // we clear it here as much as possible
-    TournamentManager::clear();
     STKProcess::reset();
     StateManager::clear();
     NetworkConfig::clear();
@@ -2701,7 +2687,6 @@ static void cleanSuperTuxKart()
 {
 
     delete main_loop;
-    TournamentManager::destroy();
 
     if(Online::RequestManager::isRunning())
         Online::RequestManager::get()->stopNetworkThread();
