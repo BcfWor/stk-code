@@ -54,7 +54,6 @@
 #include "network/stk_host.hpp"
 #include "network/stk_ipv6.hpp"
 #include "network/stk_peer.hpp"
-#include "network/tournament/tournament_manager.hpp"
 #include "online/online_profile.hpp"
 #include "online/request_manager.hpp"
 #include "online/xml_request.hpp"
@@ -308,10 +307,6 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_difficulty.store(ServerConfig::m_server_difficulty);
     m_game_mode.store(ServerConfig::m_server_mode);
     m_default_vote = new PeerVote();
-    std::vector<std::string> red_team = StringUtils::split(ServerConfig::m_red_team, ' ');
-    for (auto player : red_team) m_red_team.insert(player);
-    std::vector<std::string> blue_team = StringUtils::split(ServerConfig::m_blue_team, ' ');
-    for (auto player : blue_team) m_blue_team.insert(player);
     m_player_reports_table_exists = false;
     m_allow_powerupper = ServerConfig::m_allow_powerupper;
     m_show_elo = ServerConfig::m_show_elo;
@@ -1015,21 +1010,6 @@ void ServerLobby::handleChat(Event* event)
                         }
                         return false;
                     }
-                    // supertournament game: players should not be seeing spectator 
-                    // messages, that are distracting
-                    if (!sender_in_lobby && sender_spectating && ServerConfig::m_supertournament && game_started &&
-                            (!p->isWaitingForGame() && !p->isSpectator()) && TournamentManager::get()->GameInitialized())
-                    {
-                        for (auto& player : p->getPlayerProfiles())
-                        {
-                            if (TournamentManager::get()->GetKartTeam(
-                                        StringUtils::wideToUtf8(player->getName())
-                                        ) != KART_TEAM_NONE)
-                            {
-                                return false;
-                            }
-                        }
-                    }
                 }
                 // /teamchat restrictions
                 if (team_speak)
@@ -1077,8 +1057,7 @@ void ServerLobby::handleChat(Event* event)
 void ServerLobby::changeTeam(Event* event)
 {
     if (!ServerConfig::m_team_choosing ||
-        !RaceManager::get()->teamEnabled() ||
-        ServerConfig::m_supertournament)
+        !RaceManager::get()->teamEnabled())
         return;
     if (!checkDataSize(event, 1)) return;
     NetworkString& data = event->data();
@@ -1166,11 +1145,6 @@ void ServerLobby::forceChangeTeam(NetworkPlayerProfile* const player, const Kart
     else if (peer && !peer->alwaysSpectate() && team == KART_TEAM_NONE)
         peer->setAlwaysSpectate(ASM_FULL);
 
-    if (ServerConfig::m_supertournament)
-    {
-        TournamentManager::get()->SetKartTeam(
-                StringUtils::wideToUtf8(player->getName()), team);
-    }
     if (b != m_blue_pole_votes.cend())
     {
         m_blue_pole_votes.erase(b);
@@ -1878,11 +1852,6 @@ void ServerLobby::asynchronousUpdate()
             unsigned players = 0;
             STKHost::get()->updatePlayers(&players);
 
-            if (ServerConfig::m_supertournament &&
-                    m_timeout.load() != std::numeric_limits<int64_t>::max())
-            {
-                m_timeout.store(std::numeric_limits<int64_t>::max());
-            }
             if (((int)players >= ServerConfig::m_min_start_game_players ||
                 m_game_setup->isGrandPrixStarted()) &&
                 m_timeout.load() == std::numeric_limits<int64_t>::max())
@@ -1948,20 +1917,6 @@ void ServerLobby::asynchronousUpdate()
         // Reset for next state usage
         resetPeersReady();
         configPeersStartTime();
-        // In soccer, change the score if set
-        if (ServerConfig::m_supertournament)
-        {
-            int red_goals = 0, blue_goals = 0;
-            TournamentManager::get()->GetCurrentResult(red_goals, blue_goals);
-            if (red_goals > 0 || blue_goals > 0)
-            {
-                World* w = World::getWorld();
-                SoccerWorld* sw = dynamic_cast<SoccerWorld*>(w);
-                sw->setInitialCount(red_goals, blue_goals);
-                sw->tellCount();
-                Log::info("TournamentManager", "init %d %d", red_goals, blue_goals);
-            }
-        }
         break;
     }
     case SELECTING:
@@ -1983,9 +1938,6 @@ void ServerLobby::asynchronousUpdate()
         bool track_voting = ServerConfig::m_track_voting;
 
         if (track_voting && !m_set_field.empty())
-            track_voting = false;
-        else if (track_voting && ServerConfig::m_supertournament &&
-                !TournamentManager::get()->IsGameVotable())
             track_voting = false;
 
         if (track_voting)
@@ -2155,10 +2107,6 @@ void ServerLobby::asynchronousUpdate()
                     log_msg = "Addon: " + winner_vote.m_track_name;
                	    GlobalLog::writeLog(log_msg + "\n", GlobalLogTypes::POS_LOG);
                     Log::info("AddonLog", log_msg.c_str());
-            }
-            if (ServerConfig::m_supertournament)
-            {
-                TournamentManager::get()->SetPlayedField(winner_vote.m_track_name);
             }
 
 
@@ -2827,8 +2775,6 @@ void ServerLobby::update(int ticks)
            // RaceManager::get()->setRecordRace(false);
            ReplayRecorder::get()->reset();
         }
-        if (ServerConfig::m_supertournament)
-            onTournamentGameEnded();
         // This will go back to lobby in server (and exit the current race)
         exitGameState();
         // Reset for next state usage
@@ -2838,16 +2784,6 @@ void ServerLobby::update(int ticks)
         m_timeout.store((int64_t)StkTime::getMonoTimeMs() + 15000);
         m_state = RESULT_DISPLAY;
         sendMessageToPeers(m_result_ns, /*reliable*/ true);
-        if (ServerConfig::m_supertournament)
-        {
-            World* w = nullptr;
-            SoccerWorld* sw = nullptr;
-            w = World::getWorld();
-            if (w)
-                sw = dynamic_cast<SoccerWorld*>(w);
-            if (sw)
-                sw->tellCountIfDiffers();
-        }
         Log::info("ServerLobby", "End of game message sent");
 
         if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
@@ -3166,37 +3102,6 @@ void ServerLobby::startSelection(const Event *event)
                 sendStringToPeer(msg, peer);
 	    }
         }
-        if (ServerConfig::m_supertournament)
-        {
-            std::string msg = "";
-
-            if (!TournamentManager::get()->GameInitialized())
-                msg = "The game is not initialized yet (/game).";
-
-            if (!TournamentManager::get()->HasRequiredAddons(peer->getClientAssets().second))
-            {
-                std::pair<size_t, std::string> missing_required =
-                    TournamentManager::get()->FormatMissingAddons(peer.get(), false);
-                std::pair<size_t, std::string> missing_semi_required =
-                    TournamentManager::get()->FormatMissingAddons(peer.get(), true);
-                int min_semi_required = missing_semi_required.first -
-                    ServerConfig::m_tourn_semi_required_fields_minus;
-                int semi_required = missing_semi_required.first;
-                msg = StringUtils::insertValues(
-                        "You need to install required addons: %s\n... and %d of %d of the following addons: %s",
-                        missing_required.second.c_str(),
-                        min_semi_required,
-                        semi_required,
-                        missing_semi_required.second.c_str());
-
-
-            }
-            if (!msg.empty())
-            {
-                sendStringToPeer(msg, peer);
-                return;
-            }
-        }
         if (is_sbl)
         {
             const std::string msg = "You need to wait for the free spot for playing the game.";
@@ -3274,20 +3179,6 @@ void ServerLobby::startSelection(const Event *event)
     auto peers = STKHost::get()->getPeers();
     std::set<STKPeer*> always_spectate_peers;
     bool has_peer_plays_game = false;
-    // SuperTournament: field restrictons
-    //
-    if (ServerConfig::m_supertournament &&
-            TournamentManager::get()->GameInitialized())
-    {
-        //if (!TournamentManager::get()->GetPlayedField().empty())
-        //    m_set_field = TournamentManager::get()->GetPlayedField();
-        auto st_tracks_erase = 
-            TournamentManager::get()->GetExcludedAddons(m_available_kts.second);
-        for (const auto& trname : st_tracks_erase)
-        {
-            tracks_erase.insert(trname);
-        }
-    }
     for (auto peer : peers)
     {
         if (!peer->isValidated() || peer->isWaitingForGame())
@@ -3461,17 +3352,6 @@ void ServerLobby::startSelection(const Event *event)
         m_available_kts.second.insert(m_set_field);
         goto skip_default_vote_randomizing;
     }
-    else if (ServerConfig::m_supertournament &&
-            !TournamentManager::get()->IsGameVotable())
-    {
-        Log::verbose("ServerLobby", "Disabling voting tracks: match has set field.");
-        track_voting = false;
-        *m_default_vote = TournamentManager::get()->GetForcedVote();
-        m_fixed_laps = m_default_vote->m_num_laps;
-        // ensure that the m_available_kts.second has the said set field.
-        m_available_kts.second.insert(m_default_vote->m_track_name);
-        goto skip_default_vote_randomizing;
-    }
 
     if (m_available_kts.second.empty())
     {
@@ -3538,12 +3418,6 @@ void ServerLobby::startSelection(const Event *event)
             break;
     }
 
-    if (ServerConfig::m_supertournament)
-    {
-        const PeerVote antirandom = TournamentManager::get()->GetForcedVote();
-        m_default_vote->m_num_laps = antirandom.m_num_laps;
-        m_default_vote->m_reverse = antirandom.m_reverse;
-    }
 skip_default_vote_randomizing:
     if (!allowJoinedPlayersWaiting())
     {
@@ -3556,8 +3430,6 @@ skip_default_vote_randomizing:
     }
 
     float voting_timeout = ServerConfig::m_voting_timeout;
-    if (!m_set_field.empty() || (ServerConfig::m_supertournament && !TournamentManager::get()->IsGameVotable()))
-        voting_timeout /= 2.0f;
     startVotingPeriod(voting_timeout);
     const auto& all_k = m_available_kts.first;
     const auto& all_t = m_available_kts.second;
@@ -3572,15 +3444,7 @@ skip_default_vote_randomizing:
             peer->hasPlayerProfiles() && profiles.size() == 1 
             && !profiles[0]->getForcedKart().empty();
         std::string forced_kart;
-        if (ServerConfig::m_supertournament)
-        {
-            forced_kart = 
-                TournamentManager::get()->GetKart(
-                        StringUtils::wideToUtf8(profiles[0]->getName()));
-            if (!forced_kart.empty())
-                hasEnforcedKart = true;
-        }
-        else if (hasEnforcedKart)
+        if (hasEnforcedKart)
         {
             forced_kart = profiles[0]->getForcedKart();
         }
@@ -4866,18 +4730,6 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 
         std::string utf8_online_name = StringUtils::wideToUtf8(online_name);
 
-        if (ServerConfig::m_supertournament)
-        {
-            const KartTeam team = TournamentManager::get()->GetKartTeam(utf8_online_name);
-            if (team != KART_TEAM_NONE)
-                player->setTeam(team);
-            else
-                player->addRestriction(PRF_NOGAME);
-
-            if (set_kart.empty())
-                set_kart = TournamentManager::get()->GetKart(utf8_online_name);
-        }
-
         if (!set_kart.empty())
             player->forceKart(set_kart);
 
@@ -4887,8 +4739,7 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             player->setTeam(KART_TEAM_NONE);
         }
 
-        else if (ServerConfig::m_team_choosing &&
-                !ServerConfig::m_supertournament)
+        else if (ServerConfig::m_team_choosing)
         {
             KartTeam cur_team = KART_TEAM_NONE;
             if (red_blue.first > red_blue.second)
@@ -4897,12 +4748,12 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
                 red_blue.second++;
             }
             else
-            {
-                cur_team = KART_TEAM_RED;
-                red_blue.first++;
-            }
-            player->setTeam(cur_team);
-        }
+	    {
+		    cur_team = KART_TEAM_RED;
+		    red_blue.first++;
+	    }
+	    player->setTeam(cur_team);
+	}
         peer->addPlayer(player);
     }
 
@@ -5211,18 +5062,6 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
 			rankstr.append(irr::core::stringw(elorank.first));
 		profile_name = rankstr + L" " + profile_name;
 	}
-        // Display the team in case of tournament
-        if (ServerConfig::m_supertournament)
-        {
-            std::string team = "[" + TournamentManager::get()->GetTeam(user_name) + "] ";
-            if (team != "[] ")
-                profile_name = StringUtils::utf8ToWide(team) + profile_name;
-            // Add hammer icon when profile has at least referee permissions
-
-            if (profile->getPermissionLevel() >= PERM_REFEREE)
-                profile_name = profile_name + " " + StringUtils::utf32ToWide({0x1f528});
-        }
-
 
         pl->addUInt32(profile->getHostId()).addUInt32(profile->getOnlineId())
             .addUInt8(profile->getLocalPlayerId())
@@ -5359,9 +5198,6 @@ void ServerLobby::handlePlayerVote(Event* event)
                   m_state.load());
         return;
     }
-    if (ServerConfig::m_supertournament &&
-            !TournamentManager::get()->CountPlayerVote(event->getPeer()))
-        return;
 
     if (!m_set_field.empty())
         return;
@@ -5402,21 +5238,6 @@ void ServerLobby::handlePlayerVote(Event* event)
             vote.m_num_laps =
                 (uint8_t)(fmaxf(1.0f, (float)t->getDefaultNumberOfLaps() *
                 ServerConfig::m_auto_game_time_ratio));
-        }
-        else if (m_fixed_laps != -1)
-            vote.m_num_laps = m_fixed_laps;
-        else if (vote.m_num_laps == 0 || vote.m_num_laps > 20)
-            vote.m_num_laps = (uint8_t)3;
-        if (!t->reverseAvailable() && vote.m_reverse)
-            vote.m_reverse = false;
-    }
-    else if (RaceManager::get()->isSoccerMode())
-    {
-        if (ServerConfig::m_supertournament &&
-                TournamentManager::get()->GameInitialized())
-        {
-            vote.m_num_laps = TournamentManager::get()->GetAdditionalMinutesRounded();
-            vote.m_reverse = TournamentManager::get()->IsRandomItems();
         }
         if (RaceManager::get()->isInfiniteMode())
         {
@@ -5598,9 +5419,6 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
             else
                 it++;
         }
-        /* set tournament played field here */
-        if (ServerConfig::m_supertournament)
-            TournamentManager::get()->SetPlayedField(m_default_vote->m_track_name);
         *winner_peer_id = closest_lap->first;
         *winner_vote = closest_lap->second;
         return true;
@@ -6525,10 +6343,6 @@ void ServerLobby::changeHandicap(Event* event)
     uint8_t local_id = data.getUInt8();
     auto& player = event->getPeer()->getPlayerProfiles().at(local_id);
 
-    if (ServerConfig::m_supertournament && 
-            player->getPermissionLevel() < PERM_REFEREE)
-        return;
-
     // Check for restrictions
     if (player->hasRestriction(PRF_HANDICAP))
     {
@@ -6801,14 +6615,6 @@ void ServerLobby::setPlayerKarts(const NetworkString& ns, STKPeer* peer) const
         auto& player = peer->getPlayerProfiles()[i];
         if (!player->getForcedKart().empty())
             player->setKartName(player->getForcedKart());
-        else if (ServerConfig::m_supertournament)
-        {
-            std::string player_name = 
-                StringUtils::wideToUtf8(player->getName());
-            std::string tournament_kart =
-                TournamentManager::get()->GetKart(player_name);
-            if (!tournament_kart.empty()) player->setKartName(tournament_kart);
-        }
 
         const std::string& kart_id = player->getKartName();
         if (NetworkConfig::get()->useTuxHitboxAddon() &&
@@ -6883,19 +6689,6 @@ void ServerLobby::clientInGameWantsToBackLobby(Event* event)
         Log::warn("ServerLobby", "%s try to leave the game at wrong time.",
             peer->getAddress().toString().c_str());
         return;
-    }
-
-    if (ServerConfig::m_supertournament)
-    {
-        int num_players_in_game = 0;
-        for (auto p : m_peers_ready)
-            if (auto peer = p.first.lock())
-                if (!peer->isSpectator())
-                    num_players_in_game++;
-
-        // If all players go back to the lobby, save the time, the scorers and the result before.
-        if (num_players_in_game == 1 && !event->getPeer()->isSpectator())
-            onTournamentGameEnded();
     }
 
     if (m_process_type == PT_CHILD &&
@@ -7241,13 +7034,6 @@ void ServerLobby::handleServerCommand(Event* event,
             return;
         }
 
-        if (ServerConfig::m_supertournament && player->getPermissionLevel() < PERM_REFEREE)
-        {
-            std::string msg = "Only referee can set that.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
         if (argv[1] == "1")
         {
             if (m_process_type == PT_CHILD &&
@@ -7343,15 +7129,6 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
-        if (ServerConfig::m_supertournament && game_started &&
-                TournamentManager::get()->GameInitialized() &&
-                player->getPermissionLevel() < PERM_REFEREE)
-        {
-            std::string msg = "Do not distract tournament participants."
-                " Please wait until the game is finished.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
 
         if (argv.size() == 1)
         {
@@ -7693,306 +7470,6 @@ void ServerLobby::handleServerCommand(Event* event,
             player_peer->kick();
         }
     }
-    // SuperTournament Reborn Commands
-    else if (ServerConfig::m_supertournament && argv[0] == "setreferee")
-    {
-        std::string msg;
-        if (player->getPermissionLevel() < PERM_ADMINISTRATOR)
-        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-        if (argv.size() < 3)
-        {
-            msg = "Format: /setreferee [on/off] player_name";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        bool state = argv[1] == "on";
-
-        auto target = STKHost::get()->findPeerByName(
-                StringUtils::utf8ToWide(argv[2]), true, true
-                );
-        int target_permlvl = loadPermissionLevelForUsername(
-                StringUtils::utf8ToWide(argv[2]));
-        if ((player->getPermissionLevel() <= target_permlvl) &&
-                ServerConfig::m_server_owner > 0 &&
-                ServerConfig::m_server_owner != player->getOnlineId())
-        {
-            msg = "You can only change permission level of a player that has lower permission level than yours.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (target && target->hasPlayerProfiles() &&
-                target->getPlayerProfiles()[0]->getOnlineId() != 0)
-        {
-            auto& targetPlayer = target->getPlayerProfiles()[0];
-            writePermissionLevelForUsername(
-                    targetPlayer->getName(),
-                    state ? PERM_REFEREE : PERM_PLAYER);
-            msg = StringUtils::insertValues(
-                    "%1$s referee permissions %2$s player %3$s."
-                    " To record this player as a referee for this match, "
-                    "use /referee %3$s",
-                    state ? "Given" : "Taken",
-                    state ? "to" : "from",
-                    StringUtils::wideToUtf8(targetPlayer->getName())
-                    );
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        uint32_t online_id = lookupOID(argv[2]);
-        if (online_id)
-        {
-            writePermissionLevelForUsername(
-                    StringUtils::utf8ToWide(argv[2]), 
-                    state ? PERM_REFEREE : PERM_PLAYER);
-            msg = StringUtils::insertValues(
-                    "%1$s referee permissions %2$s player %3$s."
-                    " To record this player as a referee for this match, "
-                    "use /referee %3$s",
-                    state ? "Given" : "Taken",
-                    state ? "to" : "from",
-                    argv[2]
-                    );
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        else
-        {
-            msg = "Invalid target player: " + argv[2];
-            sendStringToPeer(msg, peer);
-        }
-    }
-    else if ((argv[0] == "redteam") || (argv[0] == "redt") || (argv[0] == "rt") ||
-		    (argv[0] == "blueteam") || (argv[0] == "bluet") || (argv[0] == "bt"))
-    {
-        std::string msg;
-        if (!ServerConfig::m_team_choosing || !RaceManager::get()->teamEnabled() || ServerConfig::m_supertournament || player->getPermissionLevel() < PERM_PLAYER || player->hasRestriction(PRF_NOTEAM)) return;
-        if ((m_state.load() != WAITING_FOR_START_GAME) && (m_state.load() != RACING))
-        {
-            msg = "You cannot change team while loading game!";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        auto pp = peer->getPlayerProfiles()[0];
-        peer->setAlwaysSpectate(ASM_NONE);
-        if (argv[0] == "redteam" || argv[0] == "redt" || argv[0] == "rt")
-	{
-		pp->setTeam(KART_TEAM_RED);
-	}
-	else if (argv[0] == "blueteam" || argv[0] == "bluet" || argv[0] == "bt")
-	{
-		pp->setTeam(KART_TEAM_BLUE);
-	}
-        updatePlayerList();
-    }
-    else if (ServerConfig::m_supertournament && argv[0] == "yellow")
-    {
-        if (argv.size() < 2)
-        {
-            std::string msg = "Format: /yellow player_name reason";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (player->getPermissionLevel() < PERM_REFEREE)
-        {
-            std::string msg = "You are not a referee.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        std::string msg = argv[1] + " was shown a yellow card by the Referee. Reason: ";
-        std::string reason = cmd.substr(8 + argv[1].length());
-        msg += reason;
-        Log::info("TournamentManager", "yellow %s %s", argv[1].c_str(), reason.c_str());
-        sendStringToAllPeers(msg);
-#if 0
-        std::string cmd = "python3 supertournament_yellow.py " + argv[1] + " &";
-        system(cmd.c_str());
-#endif
-    }
-    else if (ServerConfig::m_supertournament && argv[0] == "teams")
-    {
-        std::string msg = "";
-        if (player->getPermissionLevel() < PERM_REFEREE)
-            msg = "You are not server owner";
-        else if (!ServerConfig::m_supertournament)
-            msg = "/teams command is only for SuperTournament.";
-        else if (argv.size() != 3 || argv[1] == argv[2])
-            msg = "Format: /teams red_team blue_team";
-
-        if (msg != "")
-        {
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        
-        updateTournamentTeams(argv[1], argv[2]);
-        msg = "Red team: " + argv[1] + " / Blue team: " + argv[2];
-        sendStringToPeer(msg, peer);
-        return;
-    }
-    else if (ServerConfig::m_supertournament && argv[0] == "game")
-    {
-        std::string msg = "";
-        if (player->getPermissionLevel() < PERM_REFEREE)
-        {
-            msg = "You are not server owner";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (argv.size() >= 3 && argv[2] == "reset")
-        {
-            TournamentManager::get()->ResetGame(std::stoi(argv[1]));
-            return;
-        }
-
-        int game;
-        int length = argv.size() >= 3 ? std::stoi(argv[2]) : -1;
-        bool ok = argv.size() >= 2 && std::stoi(argv[1]) > 0 && std::stoi(argv[1]) <= 5;
-        if (argv.size() >= 3)
-            ok &= (std::stoi(argv[2]) > 0 && std::stoi(argv[2]) <= 15);
-        
-        if (argv.size() > 2 && !ok)
-        {
-            msg = "Please specify a correct number. Format: /game [number] [length]";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        else if (ok)
-        {
-            game = std::stoi(argv[1]);
-            length = argv.size() >= 3 ? std::stoi(argv[2]) : -1;
-            //ServerConfig::m_fixed_lap_count = length;
-        }
-        else
-        {
-            // start next game
-            game = -1;
-            length = -1;
-        }
-
-        if (ServerConfig::m_supertournament)
-        {
-            if (TournamentManager::get()->GameOpen())
-            {
-                msg = "There is still a game in progress. Play the additional time, or use /gameend to force terminating it.";
-                sendStringToPeer(msg, peer);
-                return;
-            }
-            else if (game != -1 && TournamentManager::get()->GameDone(game))
-            {
-                if (argv.size() >= 3)
-                {
-                    TournamentManager::get()->AddAdditionalSeconds(game , length * 60);
-                }
-                else
-                {
-                    msg = "Game " + argv[1] + " has already been played. Use \"/game " + argv[1] + " [time]\" to play some additional time. To restart and overwrite the game, use \"/game " + argv[1] + " reset\".";
-                    sendStringToPeer(msg, peer);
-                }
-                return;
-            }
-            else if (game < 0)
-            {
-                TournamentManager::get()->StartNextGame(true);
-            }
-            else if (length < 0)
-            {
-                TournamentManager::get()->StartGame(game, true);
-            }
-            else
-            {
-                TournamentManager::get()->StartGame(game, length * 60, true);
-            }
-        }
-    }
-    else if (argv[0] == "gameend")
-    {
-        std::string msg = "";
-        if (!ServerConfig::m_supertournament)
-            msg = "This command is only for SuperTournament.";
-        if (player->getPermissionLevel() < PERM_REFEREE)
-            msg = "You are not server owner";
-        if (m_state.load() != WAITING_FOR_START_GAME)
-            msg = "This commmand can only be used in the lobby.";
-        if (msg != "")
-        {
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
-        TournamentManager::get()->ForceEndGame();
-        msg = "The game has been ended.";
-        sendStringToPeer(msg, peer);
-    }
-    else if ((argv[0] == "referee") || (argv[0] == "video"))
-    {
-        if (player->getPermissionLevel() < PERM_REFEREE)
-        {
-            std::string msg = "You are not server owner";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (argv.size() < 2) return;
-        if (argv[0]=="referee") TournamentManager::get()->SetReferee(argv[1]);
-        else if (argv[0]=="video") TournamentManager::get()->SetVideo(argv[1]);
-    }
-    else if (argv[0] == "stop")
-    {
-        if (player->getPermissionLevel() < PERM_REFEREE)
-        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-      
-         World* w = World::getWorld();
-         if (!w)
-             return;
-         SoccerWorld *sw = dynamic_cast<SoccerWorld*>(w);
-         TournamentManager::get()->StopGame(sw->getElapsedTime());
-         sw->stop();
-    }
-    else if (argv[0] == "go")
-    {
-        if (player->getPermissionLevel() < PERM_REFEREE)
-        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-       
-        World* w = World::getWorld();
-        if (!w)
-            return;
-        SoccerWorld *sw = dynamic_cast<SoccerWorld*>(w);
-        TournamentManager::get()->ResumeGame(sw->getElapsedTime());
-        sw->resume();
-    }
-    else if (argv[0] == "init")
-    {
-        std::string msg = "";
-        if (!ServerConfig::m_supertournament)
-            msg = "This command is only for SuperTournament.";
-        if (player->getPermissionLevel() < PERM_REFEREE)
-            msg = "You are not server owner";
-
-        int red = 0, blue = 0;
-        if (argv.size() < 3 ||
-            !StringUtils::parseString<int>(argv[1], &red) ||
-            !StringUtils::parseString<int>(argv[2], &blue))
-            msg = "Usage: /init [red_count] [blue_count]";
-
-        if (msg != "")
-        {
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
-        TournamentManager::get()->SetCurrentResult(red, blue);
-        msg = "The game is initialized with result " + std::to_string(red) + "-" + std::to_string(blue);
-        sendStringToPeer(msg, peer);
-    }
-
     else if (argv[0] == "playeraddonscore" || argv[0] == "pas")
     {
         if (!player || player->getPermissionLevel() <= PERM_NONE)
@@ -8474,8 +7951,7 @@ void ServerLobby::handleServerCommand(Event* event,
 
         sendStringToAllPeers(message);	
     }
-    else if (!ServerConfig::m_supertournament &&
-            (argv[0] == "bowlparty" || argv[0] == "bp"))
+    else if (argv[0] == "bowlparty" || argv[0] == "bp")
     {
         irr::core::stringw response;
 
@@ -8538,8 +8014,7 @@ void ServerLobby::handleServerCommand(Event* event,
 
         sendStringToAllPeers(message);
     }
-    else if (!ServerConfig::m_supertournament &&
-	    (argv[0] == "bowltrainingparty" || argv[0] == "btp"))
+    else if (argv[0] == "bowltrainingparty" || argv[0] == "btp")
     {
 	    irr::core::stringw response;
 	    if (argv[0] == "btp")
@@ -8708,8 +8183,7 @@ void ServerLobby::handleServerCommand(Event* event,
 	    sendStringToAllPeers(message);
     }
 
-    else if (!ServerConfig::m_supertournament &&
-            (argv[0] == "cakeparty" || argv[0] == "cp" || argv[0] == "cakefest"))
+    else if (argv[0] == "cakeparty" || argv[0] == "cp" || argv[0] == "cakefest")
     {
         irr::core::stringw response;
 	
@@ -9560,7 +9034,7 @@ unmute_error:
         sendStringToPeer(result.empty() ? "No ELO changes" : result, peer);
         return;
     }    
-    else if (!ServerConfig::m_supertournament && (argv[0] == "autoteams" || argv[0] == "mix" || argv[0] == "am"))
+    else if (argv[0] == "autoteams" || argv[0] == "mix" || argv[0] == "am")
     {
 	    if (argv[0] == "mix")
 	    {
@@ -9667,7 +9141,7 @@ unmute_error:
             return;
         }
 
-        if (!ServerConfig::m_supertournament && (noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+        if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
@@ -9688,10 +9162,7 @@ unmute_error:
         NetworkString* const ns = getNetworkString();
         ns->setSynchronous(true);
         ns->addUInt8(LE_CHAT);
-        if (ServerConfig::m_supertournament)
-            ns->encodeString16("The game will be restarted or continued.");
-        else
-            ns->encodeString16("The game has been interrupted.");
+        ns->encodeString16("The game has been interrupted.");
 	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
 	{
 	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
@@ -10053,18 +9524,6 @@ unmute_error:
             return;
         }
         const bool canSpecifyExtra = player->getPermissionLevel() >= PERM_MODERATOR;
-
-#if 0
-        if (ServerConfig::m_supertournament)
-        {
-            if (!TournamentManager::get()->GameInitialized())
-            {
-                std::string msg = "The game is not initialized yet (/game). /setkart will have no effect.";
-                sendStringToPeer(msg, peer);
-                return;
-            }
-        }
-#endif
         const KartProperties* kart =
             kart_properties_manager->getKart(argv[1]);
         if ((!kart || kart->isAddon()) && argv[1] != "off")
@@ -10088,11 +9547,6 @@ unmute_error:
         }
         if (!t_player || !t_peer || !t_peer->hasPlayerProfiles())
         {
-            if (ServerConfig::m_supertournament)
-            {
-                TournamentManager::get()->SetKart(argv[2], argv[1]);
-                return;
-            }
             msg = "Invalid target player: " + argv[2];
             sendStringToPeer(msg, peer);
             return;
@@ -10130,10 +9584,6 @@ unmute_error:
             }
         }
         Log::info("ServerLobby", "setkart %s %s", argv[1].c_str(), playername.c_str());
-        if (ServerConfig::m_supertournament)
-        {
-            TournamentManager::get()->SetKart(playername, argv[1]);
-        }
     }
     else if (argv[0] == "setfield" || argv[0] == "settrack" || argv[0] == "setarena")
     {
@@ -10278,7 +9728,7 @@ unmute_error:
             return;
         }
 
-        if (!ServerConfig::m_supertournament && (noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
+        if ((noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
                 && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
@@ -10873,10 +10323,6 @@ bool ServerLobby::canRace(STKPeer* peer) const
       }
       if (has_addon == false) return false;
     }
-    //if (ServerConfig::m_supertournament)
-    //{
-    //    if (!(m_red_team.count(username)) && !(m_blue_team.count(username))) return false;
-    //}
     return true;
 }   // canRace
 
@@ -10925,7 +10371,7 @@ void ServerLobby::sendStringToAllPeers(std::string& s)
 
 bool ServerLobby::voteForCommand(std::shared_ptr<STKPeer>& peer, std::string command)
 {
-    if (ServerConfig::m_supertournament || !ServerConfig::m_command_voting) return false;
+    if (!ServerConfig::m_command_voting) return false;
 
     std::string username = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
     int playerCount = STKHost::get()->getPeers().size();
@@ -12499,24 +11945,6 @@ void ServerLobby::changeTimeout(long timeout, bool infinite, bool absolute)
     sendStringToAllPeers(msg);
 }
 //-----------------------------------------------------------------------------
-void ServerLobby::onTournamentGameEnded()
-{
-    m_set_field.clear();
-    World* w = World::getWorld();
-    if (w)
-    {
-        SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld());
-        GameResult result(sw->getScorers(KART_TEAM_RED), sw->getScorers(KART_TEAM_BLUE));
-        TournamentManager::get()->HandleGameResult(sw->getElapsedTime(), result);
-        sw->tellCountIfDiffers();
-        if (TournamentManager::get()->GetAdditionalSeconds() > 0)
-        {
-            std::string add_time_msg = TournamentManager::get()->GetAdditionalTimeMessage();
-            sendStringToAllPeers(add_time_msg);
-        }
-    }
-}
-//-----------------------------------------------------------------------------
 bool ServerLobby::forceSetTrack(std::string track_id,
         int laps,
         bool specvalue, const bool is_soccer, const bool announce)
@@ -12537,8 +11965,6 @@ bool ServerLobby::forceSetTrack(std::string track_id,
         {
 #endif
         PeerVote fv;
-        if (ServerConfig::m_supertournament)
-            fv = TournamentManager::get()->GetForcedVote();
 
         auto peers = STKHost::get()->getPeers();
         for (auto& peer2 : peers)
@@ -12586,11 +12012,7 @@ bool ServerLobby::forceSetTrack(std::string track_id,
                     return false;
                 if (laps < 1)
                 {
-                    if (ServerConfig::m_supertournament)
-                        laps = fv.m_num_laps;
-                    else
-                     // apply default laps
-                        laps = t->getDefaultNumberOfLaps();
+			laps = t->getDefaultNumberOfLaps();
                 }
                 m_set_field = track_id;
                 m_set_laps = laps;
@@ -12614,33 +12036,6 @@ bool ServerLobby::forceSetTrack(std::string track_id,
             sendStringToPeer(msg, peer);*/
             return false;
         }
-}
-void ServerLobby::updateTournamentTeams(const std::string& team_red, const std::string& team_blue)
-{
-    TournamentManager::get()->UpdateTeams(team_red, team_blue);
-
-    auto peers = STKHost::get()->getPeers();
-    for (auto p : peers)
-    {
-        bool no_spectate = false;
-        for (auto player : p->getPlayerProfiles())
-        {
-            std::string name = StringUtils::wideToUtf8(player->getName());
-            KartTeam team = TournamentManager::get()->GetKartTeam(name);
-            player->setTeam(team);
-            if (team != KART_TEAM_NONE)
-            {
-                player->removeRestriction(PRF_NOGAME);
-                no_spectate = true;
-            }
-            else
-                player->addRestriction(PRF_NOGAME);
-        }
-        if (no_spectate)
-            p->setAlwaysSpectate(ASM_NONE);
-    }
-
-    updatePlayerList();
 }
 // =======================================================================
 // Assigns random karts to all players in the lobby

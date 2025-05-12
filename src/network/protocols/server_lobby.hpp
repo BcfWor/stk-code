@@ -615,9 +615,6 @@ public:
     std::string getPlayerAlt(std::string username) const;
     std::pair<std::vector<std::string>, std::vector<std::string>> createBalancedTeams(std::vector<std::pair<std::string, int>>& elo_players);
     void soccer_ranked_make_teams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec);
-
-    void onTournamentGameEnded();
-    void updateTournamentTeams(const std::string& team_red, const std::string& team_blue);
     bool isReplayRequested() const                                      { return m_replay_requested; }
     void setReplayRequested(const bool value)                           { m_replay_requested = value; }
 };   // class ServerLobby
