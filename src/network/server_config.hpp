@@ -203,6 +203,9 @@ namespace ServerConfig
     SERVER_CFG_PREFIX BoolServerConfigParam  m_race_log
 	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "race-log", "Race log (true or false)"));
 
+    SERVER_CFG_PREFIX BoolServerConfigParam  m_is_usa_server
+    SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "is-usa-server", "Variable to check if it is the USA Server"));
+
     SERVER_CFG_PREFIX BoolServerConfigParam  m_is_world_record_race
 	SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "is-world-record-race", "Is world record race (true or false)"));
 
