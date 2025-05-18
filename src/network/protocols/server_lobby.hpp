@@ -26,6 +26,8 @@
 #include "utils/cpp2011.hpp"
 #include "utils/time.hpp"
 #include "network/servers_manager.hpp"
+#include "lobby/rps_challenge.hpp"
+#include "network/moderation_toolkit/server_permission_level.hpp"
 
 #include "irrString.h"
 
@@ -91,27 +93,39 @@ public:
         EXITING
     };
 
-    /* Moderation toolkit */
-    enum ServerPermissionLevel : int
-    {
-        PERM_NONE = -100,        // no chat, nothing
-        PERM_SPECTATOR = -20,    // chat is allowed, can spectate the game
-        PERM_PRISONER = -10,     // can play the game, but unable to change teams
-        PERM_PLAYER = 0,         // can participate in the game and change teams
-        PERM_MODERATOR = 80,     // staff, allowed to change other players perm status
-                                 // (only less to the own)
-                                 // and use general moderation commands such as 
-                                 // mute, kick, ban.
-        PERM_REFEREE = 90,       // only active during tournament
-        PERM_ADMINISTRATOR = 100,// staff, can change current server's mode and toggle
-                                 // between owner-less on or off, can disable command 
-                                 // voting
-        PERM_OWNER = std::numeric_limits<int>::max(),
-                                 // Special peer, has all permissions,
-                                 // including giving the administrator permission level.
-                                 // Specified in the configuration file.
-    };
 private:
+    std::vector<std::string> m_jumble_word_list;
+    std::map<uint32_t, std::string> m_jumble_player_words;
+    std::map<uint32_t, std::string> m_jumble_player_jumbled;
+    std::map<uint32_t, uint64_t> m_jumble_player_start_time;
+    uint64_t m_jumble_last_event_time;
+    std::mt19937 m_jumble_rng;
+    std::mutex m_jumble_mutex;
+    void loadJumbleWordList();
+    std::string jumbleWord(const std::string& word);
+    void startJumbleForPlayer(uint32_t player_id);
+    void endJumbleForPlayer(uint32_t player_id, bool won);
+    void updateJumbleTimer();
+    void handleJumbleCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
+    std::vector<RPSChallenge> m_rps_challenges;
+    void handleRPSCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
+    void checkRPSTimeouts();
+    void determineRPSWinner(RPSChallenge& challenge);
+    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_a;
+    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_b;
+    int m_min_player_idx;
+    std::vector<std::pair<std::string, int>> m_player_vec;
+    int m_team_selection_votes_a;
+    int m_team_selection_votes_b;
+    std::set<uint32_t> m_team_selection_voted_peers;
+    bool m_team_selection_vote_active;
+    uint64_t m_team_selection_vote_timer;
+    void startTeamSelectionVote();
+    void handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote);
+    void applyTeamSelection(bool select_option_a);
+    void checkTeamSelectionVoteTimeout();
+    std::pair<std::vector<std::string>, std::vector<std::string>> createAlternativeTeams(
+        const std::vector<std::pair<std::string, int>>& players); 
     bool checkXmlEmoji(const std::string& username) const;
     bool checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer);
     bool m_random_karts_enabled;

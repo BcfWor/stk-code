@@ -97,14 +97,13 @@
 #include <sstream>
 #include "modes/world.hpp"
 #include "io/file_manager.hpp"
-#include "utils/file_utils.hpp"
-#include "utils/file_utils.hpp"
 #include "io/file_manager.hpp"
 #include "io/file_manager.hpp"
-#include "utils/file_utils.hpp"
 #include "utils/time.hpp"
 #include "modes/soccer_roulette.hpp"
-
+#include <algorithm>
+#include <fstream>
+#include <random>
 int ServerLobby::m_fixed_laps = -1;
 // ========================================================================
 class SubmitRankingRequest : public Online::XMLRequest
@@ -265,6 +264,8 @@ ServerLobby::~ServerLobby()
         ServerConfig::writeServerConfigToDisk();
     delete m_default_vote;
 
+    // This to be moved into the destructor of the network/database/abstract_database.hpp
+    // and the sqlite3 implementation as well, to their respective abstraction layers
 #ifdef ENABLE_SQLITE3
     m_db_connector->destroyDatabase();
     delete m_db_connector;
@@ -274,12 +275,50 @@ ServerLobby::~ServerLobby()
 //-----------------------------------------------------------------------------
 void ServerLobby::initServerStatsTable()
 {
+    // This to be moved into the method for constructing the network/database/abstract_database.hpp
+    // and the sqlite3 implementation as well, to their respective abstraction layers
+
 #ifdef ENABLE_SQLITE3
     m_db_connector->initServerStatsTable();
 #endif
 }   // initServerStatsTable
 
 //-----------------------------------------------------------------------------
+// This to be moved into the finalizer of the network/database/abstract_database.hpp
+// and the sqlite3 implementation as well, to their respective abstraction layers
+#if 0
+void ServerLobby::destroyDatabase()
+{
+#ifdef ENABLE_SQLITE3
+    auto peers = STKHost::get()->getPeers();
+    for (auto& peer : peers)
+        writeDisconnectInfoTable(peer.get());
+    if (m_db != NULL)
+        sqlite3_close(m_db);
+#endif
+}   // destroyDatabase
+
+//-----------------------------------------------------------------------------
+void ServerLobby::writeDisconnectInfoTable(STKPeer* peer)
+{
+    // This to be moved into the finalizer of the network/database/abstract_database.hpp
+    // and the sqlite3 implementation as well, to their respective abstraction layers
+
+#ifdef ENABLE_SQLITE3
+    if (m_server_stats_table.empty())
+        return;
+    std::string query = StringUtils::insertValues(
+        "UPDATE %s SET disconnected_time = datetime('now'), "
+        "ping = %d, packet_loss = %d "
+        "WHERE host_id = %u;", m_server_stats_table.c_str(),
+        peer->getAveragePing(), peer->getPacketLoss(),
+        peer->getHostId());
+    easySQLQuery(query);
+#endif
+}   // writeDisconnectInfoTable
+
+//-----------------------------------------------------------------------------
+#endif
 void ServerLobby::updateAddons()
 {
     m_addon_kts.first.clear();
@@ -562,7 +601,6 @@ void ServerLobby::handleChat(Event* event)
 
     KartTeam target_team = KART_TEAM_NONE;
 
-    // WTF????
     if (event->data().size() > 0)
         target_team = (KartTeam)event->data().getUInt8();
 
