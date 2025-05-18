@@ -7364,7 +7364,7 @@ void ServerLobby::handleServerCommand(Event* event,
             {
                 msg = msg.substr(0, msg.size() - 2);
                 chat->encodeString16(StringUtils::utf8ToWide(
-                    std::string("Server addon: ") + msg));
+                    std::string("The server has the addon: ") + msg));
             }
         }
         peer->sendPacket(chat, true/*reliable*/);
@@ -7377,6 +7377,13 @@ void ServerLobby::handleServerCommand(Event* event,
             sendNoPermissionToPeer(peer.get(), argv);
             return;
         }
+
+        if (argv[0] == "pha")
+        {
+            argv[0] = "playerhasaddon";
+            cmd = std::regex_replace(cmd,std::regex("pha"),"playerhasaddon");
+        }
+
         NetworkString* chat = getNetworkString();
         chat->addUInt8(LE_CHAT);
         chat->setSynchronous(true);
@@ -7476,6 +7483,11 @@ void ServerLobby::handleServerCommand(Event* event,
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
+        }
+        if (argv[0] == "pas")
+        {
+            argv[0] = "playeraddonscore";
+            cmd = std::regex_replace(cmd,std::regex("pas"),"playeraddonscore");
         }
         NetworkString* chat = getNetworkString();
         chat->addUInt8(LE_CHAT);
@@ -8387,14 +8399,13 @@ unmute_error:
     else if (argv[0] == "showcommands" || argv[0] == "commands" || argv[0] == "cmds" || argv[0] == "cmd")
     {
 	    std::string msg = (
-            	"/showcommands|commands|cmds|cmd, /vote, /spectate|s|sp|spec|spect, /addtime|addt"
-            	" /score|sc, /teamchat|tc|tchat, /redteam|redt|rt, /blueteam|bluet|bt "
-            	"/to|msg|dm|pm, /slots|sl, /public|pub|all,"
-            	"/listserveraddon|lsa, /playerhasaddon|pha, /kick, /playeraddonscore|pas, /serverhasaddon|sha, /inform|ifm"
-            	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole"
-            	" /start, /end, /bug, /rank, /rank10|top, /autoteams, /results|rs, /date|time" 
-            	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /rank10|top, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
-                "/setowner /setmode /setdifficulty /setgoaltarget, /stk-seen|seen, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
+            	"Available commands:\n/showcommands|commands|cmds|cmd, /vote, /spectate|s|sp|spec|spect, /addtime|addt, "
+            	"/score|sc, /teamchat|tc|tchat, /to|msg|dm|pm, /slots|sl, /public|pub|all, "
+            	"/listserveraddon|lsa, /playerhasaddon|pha, /kick, /playeraddonscore|pas, /serverhasaddon|sha, /inform|ifm, "
+            	"/report, /heavyparty|hp, /mediumparty|mp, /lightparty|lp, /scanservers|online|o, /mute, /unmute, /listmute, /pole, "
+            	"/start, /end, /bug, /rank, /rank10|top, /results|rs, /date|time, " 
+            	"/bowlparty|bp, /bowltrainingparty|btp, /cakeparty|cp|cakefest, /feature|suggest, /rank, /autoteams|mix|am, /help (command), /when eventsoccer, /tracks, /karts, /randomkarts|rks "
+                "/setowner, /setmode, /setdifficulty, /setgoaltarget, /stk-seen|seen, /itemless, /nitroless, /resetball|resetpuck|rb|rp"
         );
 	    sendStringToPeer(msg, peer);
         return;
@@ -8505,7 +8516,7 @@ unmute_error:
 			sendStringToPeer(error_msg, peer);
 		}
 	}).detach();
-    }
+    }   
     else if (argv[0] == "date" || argv[0] == "time")
     {
 	   const std::unordered_map<std::string, double> TZ_OFFSETS = {
@@ -8762,12 +8773,6 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-        else if (argv[1] == "ranking")
-        {
-            std::string msg = "To check your rank, go to: https://www.tiersservers.eu/ranking or use /rank10 /rank /top.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
        else if (argv[1] == "eventsoccer")
        {
 	       std::string msg = "in TierS Eventsoccer, the match shifts between three partys modes 👀  Heavyparty, mediumparty, and ofcourse lightparty. But thats not all, every 30 seconds, new powerups appear, for each player.";
@@ -8782,7 +8787,7 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-      else if (argv[1] == "ranking")
+      else if (argv[1] == "rank")
 	{
 		std::string msg= "To check your rank, go to: https://www.tiersservers.eu/ranking or use /rank10 /rank /top.";
 		sendStringToPeer(msg, peer);
