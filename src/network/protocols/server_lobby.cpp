@@ -4822,12 +4822,6 @@ void ServerLobby::configPeersStartTime()
     if (ServerConfig::m_soccer_roulette)
     {
 	    SoccerRoulette::get()->giveNitroToAll();
-            SoccerRoulette::get()->startMinimapExport(
-			    SoccerRoulette::m_default_minimap_server,
-                            SoccerRoulette::m_default_minimap_port);
-            Log::info("ServerLobby", "Started soccer minimap export to %s:%d",
-                            SoccerRoulette::m_default_minimap_server.c_str(),
-                            SoccerRoulette::m_default_minimap_port);
     }
            	    
     joinStartGameThread();

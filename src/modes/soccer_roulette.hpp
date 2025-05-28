@@ -52,11 +52,6 @@ public:
     bool checkRequiredAddons(STKPeer* peer, std::string& error_msg);
     void giveNitroToAll();
     const std::vector<std::string>& getFields() const { return m_fields; }
-    void startMinimapExport(const std::string& server_ip, int server_port, int update_interval_ms = 33);
-    void stopMinimapExport();
-    static std::string m_default_minimap_server;
-    static int m_default_minimap_port;
-    static bool m_enable_minimap_export;
     void resetFieldIndex();
     void calculateGameResult();
     std::string getLastGameResults();
