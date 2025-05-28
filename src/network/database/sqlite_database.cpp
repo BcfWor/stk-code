@@ -145,6 +145,10 @@ void SQLiteDatabase::init()
         m_ip_geolocation_table_exists);
     checkTableExists(ServerConfig::m_ipv6_geolocation_table,
         m_ipv6_geolocation_table_exists);
+    checkTableExists(ServerConfig::m_permissions_table,
+        m_permissions_table_exists);
+    checkTableExists(ServerConfig::m_restrictions_table,
+        m_restrictions_table_exists);
 }   // initDatabase
 
 //-----------------------------------------------------------------------------
