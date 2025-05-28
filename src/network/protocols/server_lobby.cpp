@@ -9236,7 +9236,6 @@ unmute_error:
 		}
 	}
 	team_display << "\n\nVote with /a for Team Option A or /b for Team Option B.";
-	changeTimeout(60, false, false);
         startTeamSelectionVote();
 	std::string team_display_str = team_display.str();
 	sendStringToAllPeers(team_display_str);
