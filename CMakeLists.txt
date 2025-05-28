@@ -210,6 +210,10 @@ if(UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
     endif()
 endif()
 
+# Build NNWCLI command system library (only for server)
+add_subdirectory("${PROJECT_SOURCE_DIR}/lib/nnwcli" EXCLUDE_FROM_ALL)
+include_directories(BEFORE "${PROJECT_SOURCE_DIR}/lib/nnwcli/include")
+
 # Build the Bullet physics library
 add_subdirectory("${PROJECT_SOURCE_DIR}/lib/bullet")
 include_directories(BEFORE "${PROJECT_SOURCE_DIR}/lib/bullet/src")
@@ -674,6 +678,7 @@ endif()
 
 # Common library dependencies
 target_link_libraries(supertuxkart
+    nnwcli
     bulletdynamics
     bulletcollision
     bulletmath
