@@ -1,0 +1,3 @@
+[submodule "lib/nnwcli"]
+	path = lib/nnwcli
+	url = https://github.com/NobWow/nnwcli
