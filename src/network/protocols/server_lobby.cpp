@@ -2670,20 +2670,7 @@ void ServerLobby::startSelection(const Event *event)
             insertKartsIntoNotType(karts_erase, "heavy");
             break;
     }
-    // SuperTournament: field restrictons
-    //
-    if (ServerConfig::m_supertournament &&
-            TournamentManager::get()->GameInitialized())
-    {
-        //if (!TournamentManager::get()->GetPlayedField().empty())
-        //    m_set_field = TournamentManager::get()->GetPlayedField();
-        auto st_tracks_erase = 
-            TournamentManager::get()->GetExcludedAddons(m_available_kts.second);
-        for (const auto& trname : st_tracks_erase)
-        {
-            tracks_erase.insert(trname);
-        }
-    }
+
     for (auto peer : peers)
     {
         // Spectators won't remove maps as they are already waiting for game
