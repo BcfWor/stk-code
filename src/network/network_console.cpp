@@ -582,7 +582,7 @@ void mainLoop(STKHost* host)
             if (player)
             {
                 player->getPlayerProfiles()[0]->setPermissionLevel(
-                        ServerLobby::PERM_PLAYER);
+                        ServerPermissionLevel::PERM_PLAYER);
             }
             uint32_t oid = sl->lookupOID(str2);
             if (!oid)
@@ -590,7 +590,7 @@ void mainLoop(STKHost* host)
                 std::cout << "Player has no recorded online id, changes are temporary." << std::endl;
             }
             else
-                sl->writePermissionLevelForOID(oid, ServerLobby::PERM_PLAYER);
+                sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_PLAYER);
             std::cout << "Set " << str2 << " as player (0)." << std::endl;
         }
         else if (str == "setmoderator")
@@ -605,7 +605,7 @@ void mainLoop(STKHost* host)
             if (player)
             {
                 player->getPlayerProfiles()[0]->setPermissionLevel(
-                        ServerLobby::PERM_MODERATOR);
+                        ServerPermissionLevel::PERM_MODERATOR);
             }
             uint32_t oid = sl->lookupOID(str2);
             if (!oid)
@@ -613,7 +613,7 @@ void mainLoop(STKHost* host)
                 std::cout << "Player has no recorded online id, changes are temporary." << std::endl;
             }
             else
-                sl->writePermissionLevelForOID(oid, ServerLobby::PERM_MODERATOR);
+                sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_MODERATOR);
             std::cout << "Set " << str2 << " as moderator (80)." << std::endl;
         }
         else if (str == "setadministrator")
@@ -629,7 +629,7 @@ void mainLoop(STKHost* host)
             if (player)
             {
                 player->getPlayerProfiles()[0]->setPermissionLevel(
-                        ServerLobby::PERM_ADMINISTRATOR);
+                        ServerPermissionLevel::PERM_ADMINISTRATOR);
             }
             uint32_t oid = sl->lookupOID(str2);
             if (!oid)
@@ -637,7 +637,7 @@ void mainLoop(STKHost* host)
                 std::cout << "Player has no recorded online id, changes are temporary." << std::endl;
             }
             else
-                sl->writePermissionLevelForOID(oid, ServerLobby::PERM_ADMINISTRATOR);
+                sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_ADMINISTRATOR);
             std::cout << "Set " << str2 << " as administrator (100)." << std::endl;
         }
         // SuperTournament Reborn Commands
@@ -655,7 +655,7 @@ void mainLoop(STKHost* host)
             if (player)
             {
                 player->getPlayerProfiles()[0]->setPermissionLevel(
-                        ServerLobby::PERM_REFEREE);
+                        ServerPermissionLevel::PERM_REFEREE);
             }
             uint32_t oid = sl->lookupOID(str2);
             if (!oid)
@@ -663,8 +663,8 @@ void mainLoop(STKHost* host)
                 std::cout << "Player has no recorded online id, changes are temporary." << std::endl;
             }
             else
-                sl->writePermissionLevelForOID(oid, ServerLobby::PERM_REFEREE);
-            std::cout << "Set " << str2 << " as referee (" << ServerLobby::PERM_REFEREE << ")." << std::endl;
+                sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_REFEREE);
+            std::cout << "Set " << str2 << " as referee (" << ServerPermissionLevel::PERM_REFEREE << ")." << std::endl;
         }
         else if (ServerConfig::m_supertournament && str == "yellow" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
@@ -893,7 +893,7 @@ void mainLoop(STKHost* host)
                 continue;
             }
             bool state = str2 == "on";
-            PlayerRestriction restriction = sl->getRestrictionValue(
+            PlayerRestriction restriction = getRestrictionValue(
                     restrictionname);
             if (restriction == PRF_OK && state)
             {

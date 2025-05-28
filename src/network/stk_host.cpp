@@ -1454,7 +1454,7 @@ std::vector<std::shared_ptr<NetworkPlayerProfile> >
             if (profile->getTeam() != team)
                 continue;
 
-            if (onlyCanPlay && (profile->getPermissionLevel() < ServerLobby::PERM_PLAYER ||
+            if (onlyCanPlay && (profile->getPermissionLevel() < ServerPermissionLevel::PERM_PLAYER ||
                         profile->hasRestriction(PRF_NOGAME)))
                 continue;
 
@@ -1485,7 +1485,7 @@ void STKHost::getTeamLists(
             if (profile->getTeam() == KART_TEAM_NONE)
                 continue;
 
-            if (onlyCanPlay && (profile->getPermissionLevel() < ServerLobby::PERM_PLAYER ||
+            if (onlyCanPlay && (profile->getPermissionLevel() < ServerPermissionLevel::PERM_PLAYER ||
                         profile->hasRestriction(PRF_NOGAME)))
                 continue;
 

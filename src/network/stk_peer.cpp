@@ -19,6 +19,7 @@
 #include "network/stk_peer.hpp"
 #include "config/stk_config.hpp"
 #include "config/user_config.hpp"
+#include "moderation_toolkit/server_permission_level.hpp"
 #include "network/crypto.hpp"
 #include "network/event.hpp"
 #include "network/network.hpp"
@@ -30,6 +31,7 @@
 #include "utils/log.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/time.hpp"
+
 
 #include <string.h>
 
@@ -191,3 +193,12 @@ void STKPeer::setCrypto(std::unique_ptr<Crypto>&& c)
 {
     m_crypto = std::move(c);
 }   // setCrypto
+
+int STKPeer::getPermissionLevel() const
+{
+    if (!hasPlayerProfiles()) 
+    {
+        return PERM_NONE;
+    }
+    return m_players[0]->getPermissionLevel();
+}

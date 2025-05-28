@@ -20,6 +20,9 @@
 #define SERVER_PERMISSION_LEVEL_HPP
 
 #include <limits>
+#include <string>
+
+class STKPeer;
 
 /* Moderation toolkit */
 enum ServerPermissionLevel : int
@@ -41,5 +44,11 @@ enum ServerPermissionLevel : int
                              // including giving the administrator permission level.
                              // Specified in the configuration file.
 };
+
+const char* getPermissionLevelName(int lvl);
+ServerPermissionLevel 
+    getPermissionLevelByName(const std::string& name);
+
+int getPeerPermissionLevel(STKPeer* p);
 
 #endif // SERVER_PERMISSION_LEVEL_HPP

@@ -314,6 +314,7 @@ public:
             m_always_spectate.store(ASM_NONE);
     }
     // ------------------------------------------------------------------------
+    int getPermissionLevel() const;
 };   // STKPeer
 
 #endif // STK_PEER_HPP

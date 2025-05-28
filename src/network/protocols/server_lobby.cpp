@@ -20,7 +20,6 @@
 
 #include "addons/addon.hpp"
 #include "config/user_config.hpp"
-#include "irrMath.h"
 #include "irrString.h"
 #include "items/network_item_manager.hpp"
 #include "items/powerup.hpp"
@@ -34,7 +33,11 @@
 #include "modes/linear_world.hpp"
 #include "modes/soccer_world.hpp"
 #include "network/crypto.hpp"
-#include "network/database_connector.hpp"
+
+#ifdef ENABLE_SQLITE3
+#include "network/database/sqlite_database.hpp"
+#endif
+
 #include "network/event.hpp"
 #include "network/game_setup.hpp"
 #include "network/network.hpp"
@@ -50,7 +53,6 @@
 #include "network/race_event_manager.hpp"
 #include "network/remote_kart_info.hpp"
 #include "network/server_config.hpp"
-#include "network/soccer_ranking.hpp"
 #include "network/socket_address.hpp"
 #include "network/server.hpp"
 #include "network/stk_host.hpp"
@@ -69,7 +71,6 @@
 #include "utils/random_generator.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/time.hpp"
-//#include "utils/translation.hpp"
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <algorithm>
@@ -103,7 +104,6 @@
 #include "modes/soccer_roulette.hpp"
 #include <algorithm>
 #include <fstream>
-#include <random>
 int ServerLobby::m_fixed_laps = -1;
 // ========================================================================
 class SubmitRankingRequest : public Online::XMLRequest
@@ -232,7 +232,6 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     for (auto player : red_team) m_red_team.insert(player);
     std::vector<std::string> blue_team = StringUtils::split(ServerConfig::m_blue_team, ' ');
     for (auto player : blue_team) m_blue_team.insert(player);
-    m_player_reports_table_exists = false;
     m_allow_powerupper = ServerConfig::m_allow_powerupper;
     m_show_elo = ServerConfig::m_show_elo;
     m_show_rank = ServerConfig::m_show_rank;
@@ -243,8 +242,8 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     RaceManager::get()->setInfiniteMode(ServerConfig::m_infinite_game, false);
 
 #ifdef ENABLE_SQLITE3
-    m_db_connector = new DatabaseConnector();
-    m_db_connector->initDatabase();
+    m_db = new SQLiteDatabase();
+    m_db->init();
 #endif
 }   // ServerLobby
 
@@ -267,8 +266,7 @@ ServerLobby::~ServerLobby()
     // This to be moved into the destructor of the network/database/abstract_database.hpp
     // and the sqlite3 implementation as well, to their respective abstraction layers
 #ifdef ENABLE_SQLITE3
-    m_db_connector->destroyDatabase();
-    delete m_db_connector;
+    delete m_db;
 #endif
 }   // ~ServerLobby
 
@@ -279,7 +277,7 @@ void ServerLobby::initServerStatsTable()
     // and the sqlite3 implementation as well, to their respective abstraction layers
 
 #ifdef ENABLE_SQLITE3
-    m_db_connector->initServerStatsTable();
+    m_db->initServerStatsTable();
 #endif
 }   // initServerStatsTable
 
@@ -956,20 +954,20 @@ bool ServerLobby::notifyEventAsynchronous(Event* event)
  */
 void ServerLobby::pollDatabase()
 {
-    if (!ServerConfig::m_sql_management || !m_db_connector->hasDatabase())
+    if (!ServerConfig::m_sql_management || !m_db->hasDatabase())
         return;
 
-    if (!m_db_connector->isTimeToPoll())
+    if (!m_db->isTimeToPoll())
         return;
 
-    m_db_connector->updatePollTime();
+    m_db->updatePollTime();
 
-    std::vector<DatabaseConnector::IpBanTableData> ip_ban_list =
-            m_db_connector->getIpBanTableData();
-    std::vector<DatabaseConnector::Ipv6BanTableData> ipv6_ban_list =
-            m_db_connector->getIpv6BanTableData();
-    std::vector<DatabaseConnector::OnlineIdBanTableData> online_id_ban_list =
-            m_db_connector->getOnlineIdBanTableData();
+    std::vector<AbstractDatabase::IpBanTableData> ip_ban_list =
+            m_db->getIpBanTableData();
+    std::vector<AbstractDatabase::Ipv6BanTableData> ipv6_ban_list =
+            m_db->getIpv6BanTableData();
+    std::vector<AbstractDatabase::OnlineIdBanTableData> online_id_ban_list =
+            m_db->getOnlineIdBanTableData();
 
     for (std::shared_ptr<STKPeer>& p : STKHost::get()->getPeers())
     {
@@ -1033,7 +1031,7 @@ void ServerLobby::pollDatabase()
         }
     } // for p in peers
 
-    m_db_connector->clearOldReports();
+    m_db->clearOldReports();
 
     auto peers = STKHost::get()->getPeers();
     std::vector<uint32_t> hosts;
@@ -1046,14 +1044,14 @@ void ServerLobby::pollDatabase()
             hosts.push_back(peer->getHostId());
         }
     }
-    m_db_connector->setDisconnectionTimes(hosts);
+    m_db->setDisconnectionTimes(hosts);
 }   // pollDatabase
 #endif
 //-----------------------------------------------------------------------------
 void ServerLobby::writePlayerReport(Event* event)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db_connector->hasDatabase() || !m_db_connector->hasPlayerReportsTable())
+    if (!m_db->hasDatabase() || !m_db->hasPlayerReportsTable())
         return;
     STKPeer* reporter = event->getPeer();
     if (!reporter->hasPlayerProfiles())
@@ -1071,7 +1069,7 @@ void ServerLobby::writePlayerReport(Event* event)
         return;
     auto reporting_npp = reporting_peer->getPlayerProfiles()[0];
 
-    bool written = m_db_connector->writeReport(reporter, reporter_npp,
+    bool written = m_db->writeReport(reporter, reporter_npp,
             reporting_peer.get(), reporting_npp, info);
     if (written)
     {
@@ -1563,8 +1561,8 @@ void ServerLobby::asynchronousUpdate()
                 }
                 else
                     log_msg = "Addon: " + winner_vote.m_track_name;
-               	    GlobalLog::writeLog(log_msg + "\n", GlobalLogTypes::POS_LOG);
-                    Log::info("AddonLog", log_msg.c_str());
+                GlobalLog::writeLog(log_msg + "\n", GlobalLogTypes::POS_LOG);
+                Log::info("AddonLog", log_msg.c_str());
             }
             if (ServerConfig::m_supertournament)
             {
@@ -2643,54 +2641,6 @@ void ServerLobby::startSelection(const Event *event)
     auto peers = STKHost::get()->getPeers();
     std::set<STKPeer*> always_spectate_peers;
     bool has_peer_plays_game = false;
-    // SuperTournament: field restrictons
-    //
-    if (ServerConfig::m_supertournament &&
-            TournamentManager::get()->GameInitialized())
-    {
-        //if (!TournamentManager::get()->GetPlayedField().empty())
-        //    m_set_field = TournamentManager::get()->GetPlayedField();
-        auto st_tracks_erase = 
-            TournamentManager::get()->GetExcludedAddons(m_available_kts.second);
-        for (const auto& trname : st_tracks_erase)
-        {
-            tracks_erase.insert(trname);
-        }
-    }
-    for (auto peer : peers)
-    {
-        if (!peer->isValidated() || peer->isWaitingForGame())
-            continue;
-        if (peer->alwaysSpectate())
-            always_spectate_peers.insert(peer.get());
-        else if (!peer->isAIPeer() && peer->hasPlayerProfiles()
-                && peer->getPlayerProfiles()[0]->notRestrictedBy(PRF_NOGAME)
-                && peer->getPlayerProfiles()[0]->getPermissionLevel()
-                        >= PERM_PLAYER && canRace(peer))
-        {
-            peer->eraseServerKarts(m_available_kts.first, karts_erase);
-            peer->eraseServerTracks(m_available_kts.second, tracks_erase);
-            has_peer_plays_game = true;
-        }
-        else
-        {
-            for (auto& player : peer->getPlayerProfiles())
-            {
-                if (player->getPermissionLevel() >= PERM_SPECTATOR)
-                {
-                    peer->setAlwaysSpectate(ASM_FULL);
-                    peer->setWaitingForGame(true);
-                    always_spectate_peers.insert(peer.get());
-                }
-                if (player->hasRestriction(PRF_NOGAME) ||
-                    player->getPermissionLevel() <= PERM_SPECTATOR)
-                {
-                    always_spectate_peers.insert(peer.get());
-                    break;
-                }
-            }
-        }
-    }
 
     // Disable always spectate peers if no players join the game
     if (!has_peer_plays_game)
@@ -2770,13 +2720,54 @@ void ServerLobby::startSelection(const Event *event)
             insertKartsIntoNotType(karts_erase, "heavy");
             break;
     }
+    // SuperTournament: field restrictons
+    //
+    if (ServerConfig::m_supertournament &&
+            TournamentManager::get()->GameInitialized())
+    {
+        //if (!TournamentManager::get()->GetPlayedField().empty())
+        //    m_set_field = TournamentManager::get()->GetPlayedField();
+        auto st_tracks_erase = 
+            TournamentManager::get()->GetExcludedAddons(m_available_kts.second);
+        for (const auto& trname : st_tracks_erase)
+        {
+            tracks_erase.insert(trname);
+        }
+    }
+    // Logic 1
     for (auto peer : peers)
     {
         // Spectators won't remove maps as they are already waiting for game
         if (!peer->isValidated() || peer->isWaitingForGame())
             continue;
-        peer->eraseServerKarts(m_available_kts.first, karts_erase);
-        peer->eraseServerTracks(m_available_kts.second, tracks_erase);
+        if (!peer->isAIPeer() && peer->hasPlayerProfiles()
+                && peer->getPlayerProfiles()[0]->notRestrictedBy(PRF_NOGAME)
+                && peer->getPlayerProfiles()[0]->getPermissionLevel()
+                        >= PERM_PLAYER && canRace(peer))
+        {
+            peer->eraseServerKarts(m_available_kts.first, karts_erase);
+            peer->eraseServerTracks(m_available_kts.second, tracks_erase);
+            has_peer_plays_game = true;
+        }
+        else
+        {
+            for (auto& player : peer->getPlayerProfiles())
+            {
+                if (player->getPermissionLevel() >= PERM_SPECTATOR)
+                {
+                    peer->setAlwaysSpectate(ASM_FULL);
+                    peer->setWaitingForGame(true);
+                    always_spectate_peers.insert(peer.get());
+                    break;
+                }
+                if (player->hasRestriction(PRF_NOGAME) ||
+                    player->getPermissionLevel() <= PERM_SPECTATOR)
+                {
+                    always_spectate_peers.insert(peer.get());
+                    break;
+                }
+            }
+        }
     }
 
     for (const std::string& kart_erase : karts_erase)
@@ -3412,7 +3403,7 @@ void ServerLobby::clientDisconnected(Event* event)
     delete msg;
 
 #ifdef ENABLE_SQLITE3
-    m_db_connector->writeDisconnectInfoTable(event->getPeer());
+    m_db->writeDisconnectInfoTable(event->getPeer());
 #endif
 
     auto peer = event->getPeer();
@@ -3436,7 +3427,7 @@ void ServerLobby::clientDisconnected(Event* event)
 
 		m_replay_requested = false;
 	}
-	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER)
+	if (ServerConfig::m_soccer_log || (ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER))
 	{
             std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
             log_file << "Everyone left, game ended";
@@ -3498,7 +3489,7 @@ void ServerLobby::kickPlayerWithReason(STKPeer* peer, const char* reason) const
 void ServerLobby::saveIPBanTable(const SocketAddress& addr)
 {
 #ifdef ENABLE_SQLITE3
-    m_db_connector->saveAddressToIpBanTable(addr);
+    m_db->saveAddressToIpBanTable(addr);
 #endif
 }   // saveIPBanTable
 
@@ -3506,14 +3497,16 @@ void ServerLobby::saveIPBanTable(const SocketAddress& addr)
 void ServerLobby::removeIPBanTable(const SocketAddress& addr)
 {
 #ifdef ENABLE_SQLITE3
-    if (addr.isIPv6() || !m_db || !m_ip_ban_table_exists)
+    if (addr.isIPv6() || !m_db || !m_db->hasIpBanTable())
         return;
 
     std::string query = StringUtils::insertValues(
         "DELETE FROM %s "
         "WHERE ip_start = %u AND ip_end = %u;",
         ServerConfig::m_ip_ban_table.c_str(), addr.getIP(), addr.getIP());
-    easySQLQuery(query);
+    SQLiteDatabase* sqlite_db = dynamic_cast<SQLiteDatabase*>(m_db);
+    if (sqlite_db)
+        sqlite_db->easySQLQuery(query);
 #endif
 }   // removeIPBanTable
 
@@ -3858,9 +3851,9 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 
 #ifdef ENABLE_SQLITE3
     if (country_code.empty() && !peer->getAddress().isIPv6())
-        country_code = m_db_connector->ip2Country(peer->getAddress());
+        country_code = m_db->ip2Country(peer->getAddress());
     if (country_code.empty() && peer->getAddress().isIPv6())
-        country_code = m_db_connector->ipv62Country(peer->getAddress());
+        country_code = m_db->ipv62Country(peer->getAddress());
 #endif
 
     auto red_blue = STKHost::get()->getAllPlayersTeamInfo();
@@ -4002,7 +3995,7 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
     message_ack->addFloat(auto_start_timer)
         .addUInt32(ServerConfig::m_state_frequency)
         .addUInt8(ServerConfig::m_chat ? 1 : 0)
-        .addUInt8(playerReportsTableExists() ? 1 : 0);
+        .addUInt8(m_db->hasPlayerReportsTable() ? 1 : 0);
 
     peer->setSpectator(false);
 
@@ -4069,7 +4062,7 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
                     peer->getPlayerProfiles()[0]->getName()).c_str(),
                 peer->getPlayerProfiles()[0]->getOnlineId());
 #ifdef ENABLE_SQLITE3
-    m_db_connector->onPlayerJoinQueries(peer, online_id, player_count, country_code);
+    m_db->onPlayerJoinQueries(peer, online_id, player_count, country_code);
 #endif
 }   // handleUnencryptedConnection
 
@@ -4904,7 +4897,7 @@ void ServerLobby::configPeersStartTime()
 	    }
 	    try
 	    {
-		    std::string python_output = ServerLobby::exec_python_script();
+		    std::string python_output = ServerLobby::execPythonScript();
 		    python_output.erase(std::remove(python_output.begin(), python_output.end(), '\n'), python_output.end());
 		    Log::info("ServerLobby", "%s", python_output.c_str());
 		    if (python_output.length() > 2)
@@ -5046,7 +5039,7 @@ void ServerLobby::resetServer()
 void ServerLobby::testBannedForIP(STKPeer* peer) const
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db_connector->hasDatabase() || !m_db_connector->hasIpBanTable())
+    if (!m_db->hasDatabase() || !m_db->hasIpBanTable())
         return;
 
     // Test for IPv4
@@ -5057,8 +5050,8 @@ void ServerLobby::testBannedForIP(STKPeer* peer) const
     uint32_t ip_start = 0;
     uint32_t ip_end = 0;
 
-    std::vector<DatabaseConnector::IpBanTableData> ip_ban_list =
-            m_db_connector->getIpBanTableData(peer->getAddress().getIP());
+    std::vector<AbstractDatabase::IpBanTableData> ip_ban_list =
+            m_db->getIpBanTableData(peer->getAddress().getIP());
     if (!ip_ban_list.empty())
     {
         is_banned = true;
@@ -5073,7 +5066,7 @@ void ServerLobby::testBannedForIP(STKPeer* peer) const
         kickPlayerWithReason(peer, reason.c_str());
     }
     if (is_banned)
-        m_db_connector->increaseIpBanTriggerCount(ip_start, ip_end);
+        m_db->increaseIpBanTriggerCount(ip_start, ip_end);
 #endif
 }   // testBannedForIP
 
@@ -5081,7 +5074,7 @@ void ServerLobby::testBannedForIP(STKPeer* peer) const
 void ServerLobby::testBannedForIPv6(STKPeer* peer) const
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db_connector->hasDatabase() || !m_db_connector->hasIpv6BanTable())
+    if (!m_db->hasDatabase() || !m_db->hasIpv6BanTable())
         return;
 
     // Test for IPv6
@@ -5091,8 +5084,8 @@ void ServerLobby::testBannedForIPv6(STKPeer* peer) const
     bool is_banned = false;
     std::string ipv6_cidr = "";
 
-    std::vector<DatabaseConnector::Ipv6BanTableData> ipv6_ban_list =
-            m_db_connector->getIpv6BanTableData(peer->getAddress().toString(false));
+    std::vector<AbstractDatabase::Ipv6BanTableData> ipv6_ban_list =
+            m_db->getIpv6BanTableData(peer->getAddress().toString(false));
 
     if (!ipv6_ban_list.empty())
     {
@@ -5107,7 +5100,7 @@ void ServerLobby::testBannedForIPv6(STKPeer* peer) const
         kickPlayerWithReason(peer, reason.c_str());
     }
     if (is_banned)
-        m_db_connector->increaseIpv6BanTriggerCount(ipv6_cidr);
+        m_db->increaseIpv6BanTriggerCount(ipv6_cidr);
 #endif
 }   // testBannedForIPv6
 
@@ -5116,12 +5109,12 @@ void ServerLobby::testBannedForOnlineId(STKPeer* peer,
                                         uint32_t online_id) const
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db_connector->hasDatabase() || !m_db_connector->hasOnlineIdBanTable())
+    if (!m_db->hasDatabase() || !m_db->hasOnlineIdBanTable())
         return;
 
     bool is_banned = false;
-    std::vector<DatabaseConnector::OnlineIdBanTableData> online_id_ban_list =
-            m_db_connector->getOnlineIdBanTableData(online_id);
+    std::vector<AbstractDatabase::OnlineIdBanTableData> online_id_ban_list =
+            m_db->getOnlineIdBanTableData(online_id);
 
     if (!online_id_ban_list.empty())
     {
@@ -5135,7 +5128,7 @@ void ServerLobby::testBannedForOnlineId(STKPeer* peer,
         kickPlayerWithReason(peer, reason.c_str());
     }
     if (is_banned)
-        m_db_connector->increaseOnlineIdBanTriggerCount(online_id);
+        m_db->increaseOnlineIdBanTriggerCount(online_id);
 #endif
 }   // testBannedForOnlineId
 
@@ -5143,7 +5136,7 @@ void ServerLobby::testBannedForOnlineId(STKPeer* peer,
 void ServerLobby::listBanTable()
 {
 #ifdef ENABLE_SQLITE3
-    m_db_connector->listBanTable();
+    m_db->listBanTable();
 #endif
 }   // listBanTable
 
@@ -6592,13 +6585,13 @@ void ServerLobby::handleServerCommand(Event* event,
         auto pp = peer->getPlayerProfiles()[0];
         peer->setAlwaysSpectate(ASM_NONE);
         if (argv[0] == "redteam" || argv[0] == "redt" || argv[0] == "rt")
-	{
-		pp->setTeam(KART_TEAM_RED);
-	}
-	else if (argv[0] == "blueteam" || argv[0] == "bluet" || argv[0] == "bt")
-	{
-		pp->setTeam(KART_TEAM_BLUE);
-	}
+        {
+            pp->setTeam(KART_TEAM_RED);
+        }
+        else if (argv[0] == "blueteam" || argv[0] == "bluet" || argv[0] == "bt")
+        {
+            pp->setTeam(KART_TEAM_BLUE);
+        }
         updatePlayerList();
     }
     else if (ServerConfig::m_supertournament && argv[0] == "yellow")
@@ -7381,24 +7374,24 @@ void ServerLobby::handleServerCommand(Event* event,
 			       }
 			        if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_bowlparty &&
 						(noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
-				{
-					if (!voteForCommand(peer,cmd)) return;
-				}
-				else if (m_server_owner.lock() != peer &&
-						(!player || player->getPermissionLevel() < PERM_REFEREE))
-				{
-					sendNoPermissionToPeer(peer.get(), argv);
-					return;
-				}
+                    {
+                        if (!voteForCommand(peer,cmd)) return;
+                    }
+                    else if (m_server_owner.lock() != peer &&
+                            (!player || player->getPermissionLevel() < PERM_REFEREE))
+                    {
+                        sendNoPermissionToPeer(peer.get(), argv);
+                        return;
+                    }
          			if (rm->getPowerupSpecialModifier() == Powerup::TSM_BOWLTRAININGPARTY &&
 				      state)	
-				{
-					std::string msg = "Bowltrainingparty is already on.";
-					sendStringToPeer(msg, peer);
-					return;
-				}
-				rm->setPowerupSpecialModifier(
-						state ? Powerup::TSM_BOWLTRAININGPARTY : Powerup::TSM_NONE);
+                    {
+                        std::string msg = "Bowltrainingparty is already on.";
+                        sendStringToPeer(msg, peer);
+                        return;
+                    }
+                    rm->setPowerupSpecialModifier(
+                            state ? Powerup::TSM_BOWLTRAININGPARTY : Powerup::TSM_NONE);
 				std::string message("Bowltrainingparty is now ");
 				 if (state)
 				 {
@@ -8118,7 +8111,7 @@ unmute_error:
     {
 	     if (argv[0] == "rks")
 	     {
-		     argv[0] == "randomkarts";
+		     argv[0] = "randomkarts";
 		     cmd = std::regex_replace(cmd, std::regex("rks"), "randomkarts");
 
 	     }
@@ -8182,7 +8175,7 @@ unmute_error:
             }
 	    else if (argv[0] == "rb")
 	    {
-		    argv[0] == "resetball";
+		    argv[0] = "resetball";
 		    cmd = std::regex_replace(cmd, std::regex("rb"), "resetball");
 	    }
        	    if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
@@ -8881,6 +8874,8 @@ unmute_error:
             laps = -1;
         else if (canSpecifyExtra)
             laps = std::stoi(argv[2]);
+        else
+            laps = 0;
         
         if (argv.size() >= 4 && argv[3] == "on")
             specvalue = true;
@@ -9604,40 +9599,6 @@ unmute_error:
 }   // handleServerCommand
 
 //-----------------------------------------------------------------------------
-bool ServerLobby::isVIP(std::shared_ptr<STKPeer>& peer) const
-{
-    return isVIP(peer.get());
-}
-//-----------------------------------------------------------------------------
-bool ServerLobby::isVIP(STKPeer* peer) const
-{
-#if 0
-    std::string username = StringUtils::wideToUtf8(
-        peer->getPlayerProfiles()[0]->getName());
-    return m_vip_players.count(username);
-#endif
-    return peer->hasPlayerProfiles() && 
-        peer->getPlayerProfiles()[0]->getPermissionLevel() 
-        >= PERM_ADMINISTRATOR;
-}   // isVIP
-//-----------------------------------------------------------------------------
-bool ServerLobby::isTrusted(std::shared_ptr<STKPeer>& peer) const
-{
-    return isTrusted(peer.get());
-}
-//-----------------------------------------------------------------------------
-bool ServerLobby::isTrusted(STKPeer * peer) const
-{
-#if 0
-    std::string username = StringUtils::wideToUtf8(
-        peer->getPlayerProfiles()[0]->getName());
-    return m_vip_players.count(username) || m_trusted_players.count(username);
-#endif
-    return peer->hasPlayerProfiles() && 
-        peer->getPlayerProfiles()[0]->getPermissionLevel() 
-        >= PERM_MODERATOR;
-}  // isTrusted
-//-----------------------------------------------------------------------------
 bool ServerLobby::serverAndPeerHaveTrack(std::shared_ptr<STKPeer>& peer, std::string track_id) const
 {
     return serverAndPeerHaveTrack(peer.get(), track_id);
@@ -10201,43 +10162,17 @@ void ServerLobby::addPowerupSMMessage(std::string& msg) const
             break;
     }
 }
-int ServerLobby::getPeerPermissionLevel(STKPeer* p)
-{
-    if (!p->hasPlayerProfiles()) 
-    {
-        return PERM_NONE;
-    }
-    return p->getPlayerProfiles()[0]->getPermissionLevel();
-}
 int ServerLobby::loadPermissionLevelForOID(const uint32_t online_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_permissions_table_exists)
+    if (!m_db || !m_db->hasPermissionsTable())
         return 0;
 
     if (ServerConfig::m_server_owner != -1 
             && online_id == ServerConfig::m_server_owner)
         return std::numeric_limits<int>::max();
 
-    int lvl = 0;
-    char* errmsg;
-    std::string query = StringUtils::insertValues(
-        "SELECT level FROM %s WHERE online_id = %u;",
-        ServerConfig::m_permissions_table.c_str(),
-        online_id);
-    sqlite3_exec(m_db, query.c_str(),
-            [](void* ptr, int amount, char** data, char** columns) {
-                int* target = (int*)ptr;
-                *target = std::atoi(data[0]);
-                return 0;
-            }, &lvl, &errmsg);
-    if (errmsg)
-    {
-        Log::error("ServerLobby", "loadPermissionLevelForOID failure: %s", errmsg);
-        sqlite3_free(errmsg);
-        return 0;
-    }
-    return lvl;
+    return m_db->loadPermissionLevelForOID(online_id);
 #else
     return 0;
 #endif
@@ -10245,84 +10180,19 @@ int ServerLobby::loadPermissionLevelForOID(const uint32_t online_id)
 void ServerLobby::writePermissionLevelForOID(const uint32_t online_id, const int lvl)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_permissions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, level) VALUES (%u, %d) "
-        "ON CONFLICT (online_id) DO UPDATE SET level = %d;",
-        ServerConfig::m_permissions_table.c_str(),
-        online_id, lvl, lvl
-    );
-    easySQLQuery(query);
+    m_db->writePermissionLevelForOID(online_id, lvl);
 #endif
 }
 void ServerLobby::writePermissionLevelForUsername(const core::stringw& name, const int lvl)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_permissions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, level) "
-        "SELECT online_id, %d AS level FROM %s WHERE "
-        "username = ?"
-        "ON CONFLICT (online_id) DO UPDATE SET level = %d;",
-        (std::string) ServerConfig::m_permissions_table.c_str(),
-        lvl, m_server_stats_table, lvl
-    );
-    easySQLQuery(query,
-        [name](sqlite3_stmt* stmt)
-        {
-            if ((sqlite3_bind_text(stmt, 1,
-                    StringUtils::wideToUtf8(name).c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    name.c_str());
-            }
-            return 0;
-        });
+    m_db->writePermissionLevelForUsername(name, lvl);
 #endif
 }
 std::tuple<uint32_t, std::string> ServerLobby::loadRestrictionsForOID(const uint32_t online_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return std::make_tuple(0, "");
-
-    int res;
-    struct target {
-        uint32_t lvl = 0;
-        std::string kart_id;
-    } __target;
-
-    char* errmsg;
-    std::string query = StringUtils::insertValues(
-        "SELECT flags, kart_id FROM %s WHERE online_id = %u;",
-        ServerConfig::m_restrictions_table.c_str(),
-        online_id);
-    res = sqlite3_exec(m_db, query.c_str(),
-            [](void* ptr, int amount, char** data, char** columns) {
-                struct target* target = (struct target*)ptr;
-                target->lvl = std::atol(data[0]);
-                char kart_buf[121];
-                if (data[1])
-                    std::strncpy(kart_buf, data[1], 120);
-                else
-                    kart_buf[0] = 0;
-                target->kart_id = std::string(kart_buf);
-                return 0;
-            }, &__target, &errmsg);
-    if (res != SQLITE_OK && errmsg)
-    {
-        Log::error("ServerLobby", "loadRestrictionsForOID failure: %s", errmsg);
-        sqlite3_free(errmsg);
-        return std::make_tuple(__target.lvl, __target.kart_id);
-    }
-    Log::verbose("ServerLobby", "%u restrictions = %u", online_id, __target.lvl);
-    return std::make_tuple(__target.lvl, __target.kart_id);
+    return m_db->loadRestrictionsForOID(online_id);
 #else
     return 0;
 #endif
@@ -10330,53 +10200,7 @@ std::tuple<uint32_t, std::string> ServerLobby::loadRestrictionsForOID(const uint
 std::tuple<uint32_t, std::string> ServerLobby::loadRestrictionsForUsername(const core::stringw& name)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return std::make_tuple(0, "");
-
-    uint32_t df = PRF_OK;
-    int res;
-    auto default_ = std::make_tuple(df, "");
-    std::string query = StringUtils::insertValues(
-        "SELECT flags, kart_id FROM %s AS r INNER JOIN %s AS s ON (r.online_id = s.online_id) WHERE username = ?;",
-        ServerConfig::m_restrictions_table.c_str(),
-        m_server_stats_table);
-    sqlite3_stmt* stmt = NULL;
-    res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby", "loadRestrictionsForUsername failure: %s",
-                sqlite3_errmsg(m_db));
-        return default_;
-    }
-    res = sqlite3_bind_text(stmt, 1, 
-            StringUtils::wideToUtf8(name).c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::loadRestrictionsForUsername", "Failed to bind %s.",
-            name.c_str());
-        return default_;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_DONE)
-    {
-        sqlite3_finalize(stmt);
-        return default_;
-    }
-    if (res == SQLITE_ROW)
-    {
-        uint32_t flags = sqlite3_column_int(stmt, 0);
-        const char* c_kart_id = (const char*)sqlite3_column_text(stmt, 1);
-        std::string kart_id;
-        if (c_kart_id)
-            kart_id = c_kart_id;
-        sqlite3_finalize(stmt);
-        return std::make_tuple(flags, kart_id);
-    }
-    Log::error("ServerLobby", "loadRestrictionsForUsername failed to dispatch: %s",
-            sqlite3_errmsg(m_db));
-    sqlite3_finalize(stmt);
-    return default_;
+    return m_db->loadRestrictionsForUsername(name);
 #else
     return 0;
 #endif
@@ -10384,182 +10208,40 @@ std::tuple<uint32_t, std::string> ServerLobby::loadRestrictionsForUsername(const
 void ServerLobby::writeRestrictionsForOID(const uint32_t online_id, const uint32_t flags)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, flags) VALUES (%u, %u) "
-        "ON CONFLICT (online_id) DO UPDATE SET flags = %u;",
-        ServerConfig::m_restrictions_table.c_str(),
-        online_id, flags, flags
-    );
-    easySQLQuery(query);
+    m_db->writeRestrictionsForOID(online_id, flags);
 #endif
 }
 void ServerLobby::writeRestrictionsForOID(const uint32_t online_id, const uint32_t flags,
         const std::string& kart_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, flags, kart_id) VALUES (%u, %u, ?1) "
-        "ON CONFLICT (online_id) DO UPDATE SET flags = %u, kart_id = ?1;",
-        ServerConfig::m_restrictions_table.c_str(),
-        online_id, flags, flags
-    );
-    easySQLQuery(query,
-        [kart_id](sqlite3_stmt* stmt)
-        {
-            if (kart_id.empty() ? (sqlite3_bind_null(stmt, 1) != SQLITE_OK)
-                    :
-                    (sqlite3_bind_text(stmt, 1,
-                    kart_id.c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    kart_id.c_str());
-            }
-        });
+    m_db->writeRestrictionsForOID(online_id, flags, kart_id);
 #endif
 }
 void ServerLobby::writeRestrictionsForOID(const uint32_t online_id, const std::string& kart_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, kart_id) VALUES (%u, ?1) "
-        "ON CONFLICT (online_id) DO UPDATE SET kart_id = ?1;",
-        ServerConfig::m_restrictions_table.c_str(),
-        online_id
-    );
-    easySQLQuery(query,
-        [kart_id](sqlite3_stmt* stmt)
-        {
-            if (kart_id.empty() ? (sqlite3_bind_null(stmt, 1) != SQLITE_OK)
-                    :
-                    (sqlite3_bind_text(stmt, 1,
-                    kart_id.c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    kart_id.c_str());
-            }
-        });
+    m_db->writeRestrictionsForOID(online_id, kart_id);
 #endif
 }
 void ServerLobby::writeRestrictionsForUsername(const core::stringw& name, const uint32_t flags)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, flags) "
-        "SELECT online_id, %d AS flags FROM %s WHERE "
-        "username = ?"
-        "ON CONFLICT (online_id) DO UPDATE SET flags = %d;",
-        ServerConfig::m_restrictions_table.c_str(),
-        flags, m_server_stats_table, flags
-    );
-    easySQLQuery(query,
-        [name](sqlite3_stmt* stmt)
-        {
-            if ((sqlite3_bind_text(stmt, 1,
-                    StringUtils::wideToUtf8(name).c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    name.c_str());
-            }
-            return 0;
-        });
+    m_db->writeRestrictionsForUsername(name, flags);
 #endif
 }
 void ServerLobby::writeRestrictionsForUsername(const core::stringw& name, const uint32_t flags,
         const std::string& kart_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, flags, kart_id) "
-        "SELECT online_id, %d AS flags, ?1 AS kart_id FROM %s WHERE "
-        "username = ?2"
-        "ON CONFLICT (online_id) DO UPDATE SET flags = %d, kart_id = ?1;",
-        ServerConfig::m_restrictions_table.c_str(),
-        flags, m_server_stats_table, flags
-    );
-    easySQLQuery(query,
-        [name, kart_id](sqlite3_stmt* stmt)
-        {
-            if (kart_id.empty() ? (sqlite3_bind_null(stmt, 1) != SQLITE_OK)
-                    :
-                    (sqlite3_bind_text(stmt, 1,
-                    kart_id.c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    kart_id.c_str());
-            }
-            if ((sqlite3_bind_text(stmt, 2,
-                    StringUtils::wideToUtf8(name).c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    name.c_str());
-            }
-            return 0;
-        });
+    m_db->writeRestrictionsForUsername(name, flags, kart_id);
 #endif
 }
 void ServerLobby::writeRestrictionsForUsername(const core::stringw& name,
         const std::string& kart_id)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_restrictions_table_exists)
-        return;
-
-    std::string query = StringUtils::insertValues(
-        "INSERT INTO %s (online_id, kart_id) "
-        "SELECT online_id, ?1 AS kart_id FROM %s WHERE "
-        "username = ?2"
-        "ON CONFLICT (online_id) DO UPDATE SET kart_id = ?1;",
-        ServerConfig::m_restrictions_table.c_str(),
-        m_server_stats_table
-    );
-    easySQLQuery(query,
-        [name, kart_id](sqlite3_stmt* stmt)
-        {
-            if (kart_id.empty() ? (sqlite3_bind_null(stmt, 1) != SQLITE_OK)
-                    :
-                    (sqlite3_bind_text(stmt, 1,
-                    kart_id.c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    kart_id.c_str());
-            }
-            if ((sqlite3_bind_text(stmt, 2,
-                    StringUtils::wideToUtf8(name).c_str(),
-                    -1, SQLITE_TRANSIENT))
-                    != SQLITE_OK)
-            {
-                Log::error("easySQLQuery", "Failed to bind %s.",
-                    name.c_str());
-            }
-            return 0;
-        });
+    m_db->writeRestrictionsForUsername(name, kart_id);
 #endif
 }
 void ServerLobby::sendNoPermissionToPeer(STKPeer* p, const std::vector<std::string>& argv)
@@ -10582,194 +10264,23 @@ void ServerLobby::sendNoPermissionToPeer(STKPeer* p, const std::vector<std::stri
 uint32_t ServerLobby::lookupOID(const std::string& name)
 {
 #ifdef ENABLE_SQLITE3
-    if (name.empty() || !m_db)
-        return 0;
-
-    std::string query = StringUtils::insertValues(
-        "SELECT online_id FROM %s WHERE username = ? LIMIT 1;",
-        m_server_stats_table
-    );
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby", "Error in lookupOID, sqlite3_prepare_v2 returned %d: %s",
-                res, sqlite3_errmsg(m_db));
-        return 0;
-    }
-    res = sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::lookupOID", "Failed to bind %s.",
-            name.c_str());
-        return 0;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_ROW)
-    {
-        uint32_t ret = sqlite3_column_int(stmt, 0);
-        sqlite3_finalize(stmt);
-        return ret;
-    }
-    if (res == SQLITE_DONE)
-    {
-        Log::verbose("ServerLobby", "lookupOID: %s not found.",
-                name.c_str());
-        sqlite3_finalize(stmt);
-        // not found
-        return 0;
-    }
-    // error occurred
-    Log::error("ServerLobby", "Error in lookupOID, step returned %d: %s",
-            res, sqlite3_errmsg(m_db));
-    sqlite3_finalize(stmt);
-#endif
+    return m_db->lookupOID(name);
+#else
     return 0;
+#endif
 }
 uint32_t ServerLobby::lookupOID(const core::stringw& name)
 {
 #ifdef ENABLE_SQLITE3
-    if (name.empty() || !m_db)
-        return 0;
-
-    std::string query = StringUtils::insertValues(
-        "SELECT online_id FROM %s WHERE username = ? LIMIT 1;",
-        m_server_stats_table
-    );
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby", "Error in lookupOID, sqlite3_prepare_v2 returned %d: %s",
-                res, sqlite3_errmsg(m_db));
-        return 0;
-    }
-    res = sqlite3_bind_text(stmt, 1, StringUtils::wideToUtf8(name).c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::lookupOID", "Failed to bind %s.",
-            name.c_str());
-        return 0;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_ROW)
-    {
-        uint32_t ret = sqlite3_column_int(stmt, 0);
-        Log::verbose("ServerLobby", "lookupOID: %s = %d.",
-                StringUtils::wideToUtf8(name).c_str(),
-                ret);
-        sqlite3_finalize(stmt);
-        return ret;
-    }
-    if (res == SQLITE_DONE)
-    {
-        Log::verbose("ServerLobby", "lookupOID: %s not found.",
-                StringUtils::wideToUtf8(name).c_str());
-        sqlite3_finalize(stmt);
-        // not found
-        return 0;
-    }
-    // error occurred
-    Log::error("ServerLobby", "Error in lookupOID, step returned %d: %s",
-            res, sqlite3_errmsg(m_db));
-    sqlite3_finalize(stmt);
-#endif
+    return m_db->lookupOID(name);
+#else
     return 0;
+#endif
 }
 int ServerLobby::banPlayer(const std::string& name, const std::string& reason, const int days)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_online_id_ban_table_exists)
-        return -1;
-
-    if (name.empty())
-        return 1;
-    
-    std::string query = StringUtils::insertValues(
-            "INSERT INTO %s (online_id, reason, expired_days) "
-            "SELECT online_id, ?1 AS reason, ?2 AS expired_days FROM %s "
-            "WHERE online_id > 0 AND username = ?3 ON CONFLICT (online_id) DO "
-            "UPDATE SET reason = ?1, expired_days = ?2;",
-        ServerConfig::m_online_id_ban_table.c_str(),
-        m_server_stats_table
-    );
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby", "Error in banPlayer, sqlite3_prepare_v2 returned %d: %s",
-                res, sqlite3_errmsg(m_db));
-        return 2;
-    }
-    if (reason.empty())
-    {
-        res = sqlite3_bind_null(stmt, 1);
-        if (res != SQLITE_OK)
-        {
-            Log::error("ServerLobby::banPlayer", "Failed to bind arg #1 (null).");
-            return 2;
-        }
-    }
-    else
-    {
-        res = sqlite3_bind_text(stmt, 1, reason.c_str(), -1, SQLITE_TRANSIENT);
-        if (res != SQLITE_OK)
-        {
-            Log::error("ServerLobby::banPlayer", "Failed to bind arg #1.");
-            return 2;
-        }
-    }
-    if (days < 0)
-    {
-        res = sqlite3_bind_null(stmt, 2);
-        if (res != SQLITE_OK)
-        {
-            Log::error("ServerLobby::banPlayer", "Failed to bind arg #2 (null).");
-            return 2;
-        }
-    }
-    else
-    {
-        res = sqlite3_bind_int(stmt, 2, days);
-        if (res != SQLITE_OK)
-        {
-            Log::error("ServerLobby::banPlayer", "Failed to bind arg #2.");
-            return 2;
-        }
-    }
-    res = sqlite3_bind_text(stmt, 3, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::banPlayer", "Failed to bind arg #3.");
-        return 2;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res != SQLITE_DONE)
-    {
-        Log::error("ServerLobby", "Error in banPlayer, step returned %d: %s",
-            res, sqlite3_errmsg(m_db));
-        sqlite3_finalize(stmt);
-        return 2;
-    }
-    if ((res = sqlite3_changes(m_db)) == 0)
-    {
-        sqlite3_finalize(stmt);
-        // nothing is done
-        return 1;
-    }
-
-    sqlite3_finalize(stmt);
-    // player is banned, attempt to kick the player if there's one online
-
-    std::shared_ptr<STKPeer> peer = STKHost::get()->findPeerByName(
-            StringUtils::utf8ToWide(name));
-    if (peer)
-        peer->kick();
-
-    return 0;
+    return m_db->banPlayer(name, reason, days);
 #else
     return -2;
 #endif
@@ -10777,61 +10288,7 @@ int ServerLobby::banPlayer(const std::string& name, const std::string& reason, c
 int ServerLobby::unbanPlayer(const std::string& name)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_online_id_ban_table_exists)
-        return -2;
-
-    if (name.empty())
-        return 1;
-
-    std::string query = StringUtils::insertValues(
-            "DELETE FROM %s WHERE online_id IN ("
-            "SELECT online_id FROM %s "
-            "WHERE online_id > 0 AND username = ? LIMIT 1);",
-        ServerConfig::m_online_id_ban_table.c_str(),
-        m_server_stats_table
-    );
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby", "Error in unbanPlayer, sqlite3_prepare_v2 returned %d: %s",
-                res, sqlite3_errmsg(m_db));
-        return 2;
-    }
-    res = sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::unbanPlayer", "Failed to bind arg #1.");
-        return 2;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res != SQLITE_DONE)
-    {
-    Log::error("ServerLobby", "Error in unbanPlayer, step returned %d: %s",
-            res, sqlite3_errmsg(m_db));
-        sqlite3_finalize(stmt);
-        return 2;
-    }
-    if ((res = sqlite3_changes(m_db)) == 0)
-    {
-        sqlite3_finalize(stmt);
-        // nothing is done, which means player wasn't banned
-        return 1;
-    }
-#if 0
-    if (res > 1)
-    {
-        // multiple players are banned?
-        Log::error("ServerLobby::unbanPlayer",
-                "Multiple players were unbanned (%d rows affected)", res);
-        sqlite3_finalize(stmt);
-        return 2;
-    }
-#endif
-
-    sqlite3_finalize(stmt);
-    return 0;
+    return m_db->unbanPlayer(name);
 #else
     return -2;
 #endif
@@ -10840,315 +10297,23 @@ const std::string ServerLobby::formatBanList(unsigned int page,
         const unsigned int psize)
 {
 #ifdef ENABLE_SQLITE3
-    if (!m_db || !m_online_id_ban_table_exists || !psize)
-        return "";
-
-    // get number of pages first
-    std::string query_agg = StringUtils::insertValues(
-            "SELECT (count(*) / 8 + iif(count(*) %% 8 > 0, 1, 0)) AS num_pages FROM %s;",
-            ServerConfig::m_online_id_ban_table.c_str());
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query_agg.c_str(), query_agg.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby::formatBanList", "Unable to prepare the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        return "";
-    }
-    
-    unsigned int pages = 0;
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_DONE)
-    {
-        sqlite3_finalize(stmt);
-        return "No players have been banned.\n(Page 1 of 1)";
-    }
-    if (res == SQLITE_ROW)
-    {
-        sqlite3_finalize(stmt);
-        pages = sqlite3_column_int64(stmt, 0);
-    }
-    else
-    {
-        Log::error("ServerLobby::formatBanList", "Unable to execute the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        sqlite3_finalize(stmt);
-        return "";
-    }
-    sqlite3_finalize(stmt);
-
-    clamp<unsigned>(page, 1, pages);
-
-    // aggregate information acquired
-    std::string query = StringUtils::insertValues(
-            "SELECT DISTINCT b.online_id, s.username, reason, expired_days FROM %s AS b"
-            "RIGHT OUTER JOIN %s AS s ON (s.online_id = b.online_id) "
-            "LIMIT %u OFFSET %u * %u;",
-            ServerConfig::m_online_id_ban_table.c_str(),
-            m_server_stats_table, psize, psize, page);
-    
-    stmt = NULL;
-    res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby::formatBanList", "Unable to prepare the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        return "";
-    }
-
-    std::string result = StringUtils::insertValues(
-            "Online ID bans (page %d of %d):\n", page, pages
-            );
-
-    while ((res = sqlite3_step(stmt)) == SQLITE_ROW)
-    {
-        unsigned int online_id = sqlite3_column_int(stmt, 0);
-        const unsigned char* username = sqlite3_column_text(stmt, 1);
-        const unsigned char* reason;
-        if (sqlite3_column_type(stmt, 2) == SQLITE_NULL)
-        {
-            reason = (const unsigned char*)"[UNSPECIFIED]";
-        }
-        else
-        {
-            reason = sqlite3_column_text(stmt, 2);
-        }
-
-        result += StringUtils::insertValues(
-                "[%u] %s: %s", online_id, username, reason);
-
-        if (sqlite3_column_type(stmt, 3) != SQLITE_NULL)
-        {
-            result += (std::string(" (expires in ") +
-                    std::to_string(sqlite3_column_int(stmt, 3))
-                    + " days).");
-        }
-        result += "\n";
-    }
-    if (res != SQLITE_ROW)
-    {
-        Log::error("ServerLobby", "Could not make a proper ban list with consistency... "
-                "sqlite3_step returns %d", res);
-    }
-    sqlite3_finalize(stmt);
-    return result;
+    return m_db->formatBanList(page, psize);
 #else
     return "";
 #endif
 }
 const std::string ServerLobby::formatBanInfo(const std::string& name)
 {
-    if (!m_db || !m_online_id_ban_table_exists || name.empty())
-        return "";
-
-    // get number of pages first
-    std::string query_agg = StringUtils::insertValues(
-            "SELECT DISTINCT b.online_id, s.username, reason, expired_days FROM %s "
-            "INNER JOIN %s AS s ON (b.online_id = s.online_id) WHERE s.username = ?;",
-            ServerConfig::m_online_id_ban_table.c_str(),
-            m_server_stats_table);
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query_agg.c_str(), query_agg.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby::formatBanList", "Unable to prepare the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        return "";
-    }
-
-    res = sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::unbanPlayer", "Failed to bind arg #1.");
-        return "";
-    }
-    
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_DONE)
-    {
-        sqlite3_finalize(stmt);
-        return "This player has not been banned.";
-    }
-    if (res == SQLITE_ROW)
-    {
-        std::string result = StringUtils::insertValues(
-            "Online ID: %u, %s banned because: %s, days: %s",
-            sqlite3_column_int(stmt, 0),
-            sqlite3_column_text(stmt, 1),
-            (sqlite3_column_type(stmt, 2) == SQLITE_TEXT) ?
-                sqlite3_column_text(stmt, 2) :
-                (const unsigned char*)"[UNSPECIFIED]",
-            (sqlite3_column_type(stmt, 3) == SQLITE_INTEGER) ?
-                std::to_string(sqlite3_column_int(stmt, 3)) :
-                "[FOREVER]");
-        sqlite3_finalize(stmt);
-        return result;
-    }
-    else
-    {
-        sqlite3_finalize(stmt);
-        Log::error("ServerLobby::formatBanList", "Unable to execute the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        return "";
-    }
-    sqlite3_finalize(stmt);
+    return m_db->formatBanInfo(name);
 }
 int ServerLobby::loadPermissionLevelForUsername(const core::stringw& name)
 {
 #if ENABLE_SQLITE3
-    if (!m_db || !m_permissions_table_exists)
-        return PERM_PLAYER;
-
-    uint32_t online_id = lookupOID(name);
-    if (ServerConfig::m_server_owner != -1 
-            && online_id == ServerConfig::m_server_owner)
-        return std::numeric_limits<int>::max();
-
-    std::string query = StringUtils::insertValues(
-            "SELECT p.level FROM %s AS p"
-            " INNER JOIN %s AS s ON (p.online_id = s.online_id) WHERE s.username = ?;",
-            ServerConfig::m_permissions_table.c_str(),
-            m_server_stats_table
-            );
-    sqlite3_stmt* stmt = NULL;
-    int res = sqlite3_prepare_v2(m_db, query.c_str(), query.size(), &stmt, NULL);
-    if (res != SQLITE_OK || !stmt)
-    {
-        Log::error("ServerLobby::loadPermissionLevelForUsername", "Unable to prepare the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        return PERM_PLAYER;
-    }
-
-    res = sqlite3_bind_text(stmt, 1, StringUtils::wideToUtf8(name).c_str(), -1, SQLITE_TRANSIENT);
-    if (res != SQLITE_OK)
-    {
-        Log::error("ServerLobby::loadPermissionLevelForUsername", "Failed to bind arg #1.");
-        return PERM_PLAYER;
-    }
-
-    res = sqlite3_step(stmt);
-    if (res == SQLITE_DONE)
-    {
-        // nothing found
-        sqlite3_finalize(stmt);
-        return PERM_PLAYER;
-    }
-    else if (res == SQLITE_ROW)
-    {
-        uint32_t result = sqlite3_column_int(stmt, 0);
-        sqlite3_finalize(stmt);
-        return result;
-    }
-    else 
-    {
-        Log::error("ServerLobby::loadPermissionLevelForUsername", "Unable to execute the statement: %d, %s",
-                res, sqlite3_errmsg(m_db));
-        sqlite3_finalize(stmt);
-        return PERM_PLAYER;
-    }
+    return m_db->loadPermissionLevelForUsername(name);
 #else
     return PERM_PLAYER;
 #endif
 }
-const char* ServerLobby::getPermissionLevelName(int lvl) const
-{
-    if (lvl >= PERM_ADMINISTRATOR)
-        return "administrator";
-    if (lvl >= PERM_MODERATOR)
-        return "moderator";
-    if (lvl >= PERM_PLAYER)
-        return "player";
-    if (lvl >= PERM_PRISONER)
-        return "prisoner";
-    if (lvl >= PERM_SPECTATOR)
-        return "spectator";
-
-    return "none";
-}
-ServerLobby::ServerPermissionLevel 
-    ServerLobby::getPermissionLevelByName(const std::string& name) const
-{
-    if (name == "administrator")
-        return PERM_ADMINISTRATOR;
-    if (name == "moderator")
-        return PERM_MODERATOR;
-    if (name == "player")
-        return PERM_PLAYER;
-    if (name == "prisoner")
-        return PERM_PRISONER;
-    if (name == "spectator")
-        return PERM_SPECTATOR;
-
-    return PERM_NONE;
-}
-const char* 
-    ServerLobby::getRestrictionName(PlayerRestriction prf) const
-{
-    switch(prf)
-    {
-        case PRF_NOTEAM:
-            return "noteam";
-        case PRF_NOPCHAT:
-            return "nopchat";
-        case PRF_NOCHAT:
-            return "nochat";
-        case PRF_NOGAME:
-            return "nogame";
-        case PRF_NOSPEC:
-            return "nospec";
-        case PRF_HANDICAP:
-            return "handicap";
-        case PRF_TRACK:
-            return "track";
-        case PRF_ITEMS:
-            return "items";
-        case PRF_OK:
-            return "ok";
-    }
-}
-PlayerRestriction ServerLobby::getRestrictionValue(
-        const std::string& restriction) const
-{
-    if (restriction == "noteam")
-        return PRF_NOTEAM;
-    if (restriction == "nopchat")
-        return PRF_NOPCHAT;
-    if (restriction == "nochat")
-        return PRF_NOCHAT;
-    if (restriction == "nogame")
-        return PRF_NOGAME;
-    if (restriction == "nospec")
-        return PRF_NOSPEC;
-    if (restriction == "handicap")
-        return PRF_HANDICAP;
-    if (restriction == "track")
-        return PRF_TRACK;
-    if (restriction == "items")
-        return PRF_ITEMS;
-    if (restriction == "ok")
-        return PRF_OK;
-    return PRF_OK;
-}
-const std::string ServerLobby::formatRestrictions(PlayerRestriction prf) const
-{
-    std::vector<std::string> res_v;
-    for (unsigned char i = 0; i < 8; ++i)
-    {
-        uint32_t c = prf & (1 << i);
-        if (c != 0)
-            res_v.push_back(getRestrictionName((PlayerRestriction)c));
-    }
-
-    std::string result;
-    for (unsigned char i = 0; i < res_v.size(); ++i)
-    {
-        result += res_v[i];
-        if (i != res_v.size() - 1)
-            result += ", ";
-    }
-    return result;
-}
-
 void ServerLobby::setMaxPlayersInGame(const int value, const bool notify)
 {
     m_max_players_in_game = value;
@@ -11524,7 +10689,7 @@ void ServerLobby::resetKartSelections()
 // ========================================================================
 // Executes the Python script for track records and returns its output
 
-std::string ServerLobby::exec_python_script()
+std::string ServerLobby::execPythonScript()
 {
     std::array<char, 1024> buffer;
     std::string result;
@@ -11634,12 +10799,4 @@ bool ServerLobby::checkXmlEmoji(const std::string& username) const
     }    
     delete root;
     return false;
-}
-bool ServerLobby::playerReportsTableExists() const
-{
-#ifdef ENABLE_SQLITE3
-    return m_db_connector->hasPlayerReportsTable();
-#else
-    return false;
-#endif
 }

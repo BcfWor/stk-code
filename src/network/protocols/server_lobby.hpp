@@ -39,10 +39,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <set>
 
 class BareNetworkString;
-class DatabaseConnector;
+class AbstractDatabase;
 class NetworkItemManager;
 class NetworkString;
 class NetworkPlayerProfile;
@@ -134,10 +135,7 @@ private:
     std::string m_replay_dir;
     bool m_replay_requested = false;    
     std::string getTimeStamp();    
-    std::string exec_python_script();    
-    std::string currentTrackName;
-    std::string currentPlayerName;
-    std::string currentRecordTime;
+    std::string execPythonScript();    
     struct KeyData
     {
         std::string m_aes_key;
@@ -147,8 +145,9 @@ private:
         bool m_tried = false;
     };
 
+    // Add more macro conditions when needed. SQLite3 is the only implementation for now.
 #ifdef ENABLE_SQLITE3
-    DatabaseConnector* m_db_connector;
+    AbstractDatabase* m_db;
 
     void pollDatabase();
 #endif
@@ -279,6 +278,24 @@ private:
         m_blue_pole_votes;
     std::map<STKPeer*, std::weak_ptr<NetworkPlayerProfile>>
         m_red_pole_votes;
+    /* forced track to be playing, or field */
+    std::string m_set_field;
+    /* forced laps, or forced minutes to play in case of the soccer game. */
+    int         m_set_laps;
+    /* for race it's reverse on/off, for battle/soccer it's random items */
+    bool        m_set_specvalue;
+    std::map<std::string, std::vector<std::string>> m_command_voters;
+    std::set<STKPeer*> m_team_speakers;
+    //Deprecated
+    //std::map<STKPeer*, std::set<irr::core::stringw>> m_message_receivers;
+    int m_max_players;
+    int m_max_players_in_game;
+    bool m_powerupper_active = false;
+    // TODO:
+    enum KartRestrictionMode m_kart_restriction = NONE;
+    bool m_allow_powerupper = false;
+    bool m_show_elo = false;
+    bool m_show_rank = false;
 
     // connection management
     void clientDisconnected(Event* event);
@@ -358,6 +375,7 @@ private:
     std::vector<std::shared_ptr<NetworkPlayerProfile> > getLivePlayers() const;
     void setPlayerKarts(const NetworkString& ns, STKPeer* peer) const;
     bool handleAssets(const NetworkString& ns, STKPeer* peer);
+    /* TODO: to be integrated with nnwcli */
     void handleServerCommand(Event* event, std::shared_ptr<STKPeer> peer);
     void liveJoinRequest(Event* event);
     void rejectLiveJoin(STKPeer* peer, BackLobbyReason blr);
@@ -389,6 +407,7 @@ public:
     void updatePlayerList(bool update_when_reset_server = false);
     void updateServerOwner(std::shared_ptr<STKPeer> owner = nullptr);
     void updateTracksForMode();
+    /* To be adjusted and unified with the legacy signature: find usage and adjust name */
     bool checkPeersReady(bool ignore_ai_peer) const;
     bool checkPeersCanPlay(bool ignore_ai_peer) const;
     char checkPeersCanPlayAndReady(bool ignore_ai_peer) const;
@@ -444,28 +463,15 @@ public:
     }
     uint32_t getServerIdOnline() const           { return m_server_id_online; }
     void setClientServerHostId(uint32_t id)   { m_client_server_host_id = id; }
-    bool isVIP(std::shared_ptr<STKPeer>& peer) const;
-    bool isVIP(STKPeer* peer) const;
-    bool isTrusted(std::shared_ptr<STKPeer>& peer) const;
-    bool isTrusted(STKPeer* peer) const;
-    std::set<std::string> m_vip_players;
-    std::set<std::string> m_trusted_players;
     std::set<std::string> m_red_team;
     std::set<std::string> m_blue_team;
     std::vector<std::vector<std::string>>
                           m_tournament_fields_per_game;
     bool serverAndPeerHaveTrack(std::shared_ptr<STKPeer>& peer, std::string track_id) const;
     bool serverAndPeerHaveTrack(STKPeer* peer, std::string track_id) const;
-    /* forced track to be playing, or field */
-    std::string m_set_field;
-    /* forced laps, or forced minutes to play in case of the soccer game. */
-    int         m_set_laps;
-    /* for race it's reverse on/off, for battle/soccer it's random items */
-    bool        m_set_specvalue;
     bool canRace(std::shared_ptr<STKPeer>& peer) const;
     bool canRace(STKPeer* peer) const;
     static int m_fixed_laps;
-    bool playerReportsTableExists() const;
     void sendStringToPeer(const std::string& s, std::shared_ptr<STKPeer>& peer) const;
     void sendStringToPeer(const irr::core::stringw& s, std::shared_ptr<STKPeer>& peer) const;
     void sendStringToAllPeers(std::string& s);
@@ -493,11 +499,11 @@ public:
         std::shared_ptr<NetworkPlayerProfile>> decidePoles();
     void announcePoleFor(std::shared_ptr<NetworkPlayerProfile>& p, KartTeam team) const;
 
-    // shit... here it goes, this one won't compile
-    // and even if it would, then it is still screwed!
+    // When the database is made into a singleton, deprecate this method.
+    AbstractDatabase* getDatabase() { return m_db; };
     /* Moderation toolkit */
     bool moderationToolkitAvailable() { return true; }
-    int getPeerPermissionLevel(STKPeer* p);
+    /* Deprecated functions, use AbstractDatabase instance instead */
     int loadPermissionLevelForOID(uint32_t online_id);
     int loadPermissionLevelForUsername(const core::stringw& name);
     void writePermissionLevelForOID(uint32_t online_id, int lvl);
@@ -510,37 +516,24 @@ public:
     void writeRestrictionsForUsername(const core::stringw& name, uint32_t flags);
     void writeRestrictionsForUsername(const core::stringw& name, uint32_t flags, const std::string& set_kart);
     void writeRestrictionsForUsername(const core::stringw& name, const std::string& set_kart);
+    /**/
     void sendNoPermissionToPeer(STKPeer* p, const std::vector<std::string>& argv);
-    const char* getPermissionLevelName(int lvl) const;
-    ServerPermissionLevel getPermissionLevelByName(const std::string& name) const;
-    const char* getRestrictionName(PlayerRestriction prf) const;
-    const std::string formatRestrictions(PlayerRestriction prf) const;
-    PlayerRestriction getRestrictionValue(const std::string& restriction) const;
     void forceChangeTeam(NetworkPlayerProfile* player, KartTeam team);
     void forceChangeHandicap(NetworkPlayerProfile* player, HandicapLevel lvl);
     bool forceSetTrack(std::string track_id, int laps, bool specvalue = false,
             bool is_soccer = false, bool announce = true);
+    /* Todo: send to the underlying classes instead of keeping it here */
+    /* Deprecated functions, use AbstractDatabase instance instead */
     uint32_t lookupOID(const std::string& name);
     uint32_t lookupOID(const core::stringw& name);
     int banPlayer(const std::string& name, const std::string& reason, int days = -1);
     int unbanPlayer(const std::string& name);
     const std::string formatBanList(unsigned int page = 0, unsigned int psize = 8);
     const std::string formatBanInfo(const std::string& name);
+    /**/
     int64_t getTimeout();
     void changeTimeout(long timeout, bool infinite = false, bool absolute = false);
 
-    std::map<std::string, std::vector<std::string>> m_command_voters;
-    std::set<STKPeer*> m_team_speakers;
-    //Deprecated
-    //std::map<STKPeer*, std::set<irr::core::stringw>> m_message_receivers;
-    int m_max_players;
-    int m_max_players_in_game;
-    bool m_powerupper_active = false;
-    // TODO:
-    enum KartRestrictionMode m_kart_restriction = NONE;
-    bool m_allow_powerupper = false;
-    bool m_show_elo = false;
-    bool m_show_rank = false;
     std::pair<unsigned int, int> getSoccerRanking(std::string username) const;
     std::pair<unsigned int, int> getPlayerRanking(std::string username) const;
     int getMaxPlayers() const                                           { return m_max_players; }
