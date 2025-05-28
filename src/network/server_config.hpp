@@ -113,6 +113,18 @@ namespace ServerConfig
 	SERVER_CFG_DEFAULT(StringServerConfigParam("goalhistory_soccer_roulette.txt",
 	"goalhistory-path", "Path to the goal history soccer roulette file."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_soccer_roulette_fields
+       SERVER_CFG_DEFAULT(StringServerConfigParam("soccer,soccer_field,antarticy,huge",
+       "soccer-roulette-fields", "Comma-separated list of soccer fields to rotate between"));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_teams_xml_path
+       SERVER_CFG_DEFAULT(StringServerConfigParam("teams-xml-path.xml",
+       "teams-file", "Path to the teams file."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_gh_path_soccer_roulette
+       SERVER_CFG_DEFAULT(StringServerConfigParam("goalhistory_soccer_roulette.txt",
+       "goalhistory-path", "Path to the goal history soccer roulette file."));
+    
     SERVER_CFG_PREFIX IntServerConfigParam m_server_port
         SERVER_CFG_DEFAULT(IntServerConfigParam(0, "server-port",
         "Port used in server, if you specify 0, it will use the server port "
@@ -231,11 +243,18 @@ namespace ServerConfig
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_ranking_path
 	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_ranked_script_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.py", "ranked-script-path", "File path to the ranking Python script."));
+
     SERVER_CFG_PREFIX StringServerConfigParam m_update_script_path
 	SERVER_CFG_DEFAULT(StringServerConfigParam("update.py", "update-script-path", "File path to the update script."));   
 
     SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
 	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_jumble_wordlist_path
+	    SERVER_CFG_DEFAULT(StringServerConfigParam("wordlist.txt", "jumble-wordlist-path",
+	    "Path to the word list file for jumble"));
 
     SERVER_CFG_PREFIX BoolServerConfigParam m_wan_server
         SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "wan-server",

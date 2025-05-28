@@ -41,6 +41,10 @@
 #include <mutex>
 #include <random>
 #include <set>
+#include <fstream>
+#include <locale>
+#include <random>
+
 
 class BareNetworkString;
 class AbstractDatabase;

@@ -102,6 +102,8 @@
 #include "modes/soccer_roulette.hpp"
 #include <algorithm>
 #include <fstream>
+#include <locale>
+#include <random>
 int ServerLobby::m_fixed_laps = -1;
 // ========================================================================
 class SubmitRankingRequest : public Online::XMLRequest
@@ -245,6 +247,7 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_powerupper_active   = false;
     m_difficulty.store(ServerConfig::m_server_difficulty);
     m_game_mode.store(ServerConfig::m_server_mode);
+    m_default_vote = new PeerVote();
     m_allow_powerupper = ServerConfig::m_allow_powerupper;
     m_show_elo = ServerConfig::m_show_elo;
     m_show_rank = ServerConfig::m_show_rank;
@@ -258,6 +261,10 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_db = new SQLiteDatabase();
     m_db->init();
 #endif
+    m_rps_challenges.clear();
+
+    m_jumble_rng.seed(std::random_device{}());
+    loadJumbleWordList();
 }   // ServerLobby
 
 //-----------------------------------------------------------------------------
@@ -2004,6 +2011,11 @@ void ServerLobby::update(int ticks)
         m_state.load() <= RACING && m_server_has_loaded_world.load();
     bool all_players_in_world_disconnected = (w != NULL && world_started);
     int sec = ServerConfig::m_kick_idle_player_seconds;
+    if (m_state.load() == WAITING_FOR_START_GAME)
+    {
+	    checkTeamSelectionVoteTimeout();
+	    checkRPSTimeouts();
+    }
     if (world_started)
     {
         for (unsigned i = 0; i < RaceManager::get()->getNumPlayers(); i++)
@@ -7970,8 +7982,8 @@ unmute_error:
 			    iss >> name >> games >> team_size >> goals_per_game >> win_rate >> elo;
 			    if (name == username)
 			    {
-                                    player_vec.push_back(std::pair<std::string, int>(username, elo));
-                                    found = true;
+				    player_vec.push_back(std::pair<std::string, int>(username, elo));
+				    found = true;
 				    break;
 			    }
 		    }
@@ -7984,11 +7996,88 @@ unmute_error:
 	}
         int min = 0;
         std::vector <std::pair<std::string, int>> player_copy = player_vec;
-        auto teams = createBalancedTeams(player_copy);
-        soccer_ranked_make_teams(teams, min, player_vec);
-        updatePlayerList();
-        std::string message = "Teams have been generated automatically using the new formula! If teams seem unbalanced, please report it with /bug";
-        sendStringToAllPeers(message);
+        if (player_vec.size() % 2 == 1)  // in this case the number of players in uneven. In this case ignore the worst noob.
+        {
+            for (int i3 = 0; i3 < player_copy.size(); i3++)
+            {
+                if (player_copy[i3].second <= player_copy[min].second)
+                {
+                    min = i3;
+                }
+            }
+            player_copy.erase(player_copy.begin() + min);
+            int min_idx = std::min(min, (int)player_vec.size() - 1);
+            msg = "Player " + player_vec[min_idx].first + " has minimal ELO.";
+            Log::info("ServerLobby", msg.c_str());
+        }
+	m_team_option_a = createBalancedTeams(player_copy);
+	m_team_option_b = createAlternativeTeams(player_copy);
+	m_min_player_idx = min;
+	m_player_vec = player_vec;
+	std::stringstream team_display;
+	team_display << "Proposed Team Options:\n\n";
+	team_display << "Team Option A:\n";
+	team_display << "Red Team: ";
+	for (size_t i = 0; i < m_team_option_a.first.size(); i++) 
+	{
+		std::string display_name = m_team_option_a.first[i];
+		if (display_name.length() > 10) 
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_a.first.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\nBlue Team: ";
+	for (size_t i = 0; i < m_team_option_a.second.size(); i++) 
+	{
+		std::string display_name = m_team_option_a.second[i];
+		if (display_name.length() > 10)
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_a.second.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\n\nTeam Option B:\n";
+	team_display << "Red Team: ";
+	for (size_t i = 0; i < m_team_option_b.first.size(); i++) 
+	{
+		std::string display_name = m_team_option_b.first[i];
+		if (display_name.length() > 10) 
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_b.first.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\nBlue Team: ";
+	for (size_t i = 0; i < m_team_option_b.second.size(); i++)
+	{
+		std::string display_name = m_team_option_b.second[i];
+		if (display_name.length() > 10)
+		{
+			display_name = display_name.substr(0, 5) + "...";
+		}
+		team_display << display_name;
+		if (i < m_team_option_b.second.size() - 1) 
+		{
+			team_display << ", ";
+		}
+	}
+	team_display << "\n\nVote with /a for Team Option A or /b for Team Option B.";
+        startTeamSelectionVote();
+	std::string team_display_str = team_display.str();
+	sendStringToAllPeers(team_display_str);
     }
     else if (argv[0] == "goal" && argv[1] == "history")
     {
@@ -8006,6 +8095,35 @@ unmute_error:
 	    {
 		    GoalHistory::showTeamGoalHistory(peer, 1);
 	    }
+	    return;
+    }
+    else if (argv[0] == "a")
+    {
+	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    handleTeamSelectionVote(peer, "a");
+		    return;
+	    }
+    }
+    else if (argv[0] == "b")
+    {
+	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    handleTeamSelectionVote(peer, "b");
+		    return;
+	    }
+    }
+    else if (argv[0] == "rps")
+    {
+	    if (m_state.load() == WAITING_FOR_START_GAME)
+	    {
+		    handleRPSCommand(peer, argv);
+		    return;
+	    }
+    }
+    else if (argv[0] == "jumbleword" || argv[0] == "jw")
+    {
+	    handleJumbleCommand(peer, argv);
 	    return;
     }
     else if (argv[0] == "end" || argv[0] == "lobby")
@@ -8045,6 +8163,7 @@ unmute_error:
 	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
 	    log << "/end is used";
 	    log.close();
+	    Log::verbose("ServerLobby", "/end log");
 	}
         STKHost::get()->sendPacketToAllPeersWith([](STKPeer* p)
             {
@@ -10377,4 +10496,622 @@ bool ServerLobby::checkXmlEmoji(const std::string& username) const
     }    
     delete root;
     return false;
+}
+// -- 
+void ServerLobby::startTeamSelectionVote()
+{
+    m_team_selection_votes_a = 0;
+    m_team_selection_votes_b = 0;
+    m_team_selection_voted_peers.clear();
+    m_team_selection_vote_active = true;
+    // timer
+    m_team_selection_vote_timer = StkTime::getMonoTimeMs() + 60000;
+}
+void ServerLobby::handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote)
+{
+    if (!m_team_selection_vote_active)
+    {
+        std::string msg = "No team selection vote is currently active.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+    if (m_team_selection_voted_peers.find(peer->getHostId()) != m_team_selection_voted_peers.end())
+    {
+        std::string msg = "You have already voted for team selection.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+    if (vote == "a")
+    {
+        m_team_selection_votes_a++;
+        m_team_selection_voted_peers.insert(peer->getHostId());
+        std::string msg = "You voted for Team Option A.";
+        sendStringToPeer(msg, peer);
+    }
+    else if (vote == "b")
+    {
+        m_team_selection_votes_b++;
+        m_team_selection_voted_peers.insert(peer->getHostId());
+        std::string msg = "You voted for Team Option B.";
+        sendStringToPeer(msg, peer);
+    }
+    int total_players = STKHost::get()->getPeers().size();
+    int required_votes = std::max(2, total_players / 2 + 1);
+    
+    if (m_team_selection_votes_a >= required_votes)
+    {
+        applyTeamSelection(true);
+        m_team_selection_vote_active = false;
+        std::string msg = "Vote complete! Applying Team Option A.";
+        sendStringToAllPeers(msg);
+    }
+    else if (m_team_selection_votes_b >= required_votes)
+    {
+        applyTeamSelection(false);
+        m_team_selection_vote_active = false;
+        std::string msg = "Vote complete! Applying Team Option B.";
+        sendStringToAllPeers(msg);
+    }
+    else
+    {
+        std::string msg = "Team selection vote: " + std::to_string(m_team_selection_votes_a) +
+		" for Option A, " + std::to_string(m_team_selection_votes_b) +
+		" for Option B. ";
+	sendStringToAllPeers(msg);
+    }
+}
+void ServerLobby::applyTeamSelection(bool select_option_a)
+{
+    if (select_option_a)
+    {
+        soccer_ranked_make_teams(m_team_option_a, m_min_player_idx, m_player_vec);
+    }
+    else
+    {
+        soccer_ranked_make_teams(m_team_option_b, m_min_player_idx, m_player_vec);
+    }
+    updatePlayerList();
+}
+void ServerLobby::checkTeamSelectionVoteTimeout()
+{
+    if (m_team_selection_vote_active && StkTime::getMonoTimeMs() > m_team_selection_vote_timer)
+    {
+        m_team_selection_vote_active = false;
+        if (m_team_selection_votes_a > m_team_selection_votes_b)
+        {
+            applyTeamSelection(true);
+            std::string msg = "Vote time expired! Applying Team Option A based on majority vote.";
+            sendStringToAllPeers(msg);
+        }
+        else if (m_team_selection_votes_b > m_team_selection_votes_a)
+        {
+            applyTeamSelection(false);
+            std::string msg = "Vote time expired! Applying Team Option B based on majority vote.";
+            sendStringToAllPeers(msg);
+        }
+        else
+        {
+            // random
+            bool select_a = (rand() % 2 == 0);
+            applyTeamSelection(select_a);
+            std::string msg = "Vote time expired with a tie! Randomly selected " + 
+                              std::string(select_a ? "Team Option A" : "Team Option B") + ".";
+            sendStringToAllPeers(msg);
+        }
+    }
+}
+std::pair<std::vector<std::string>, std::vector<std::string>> ServerLobby::createAlternativeTeams(
+    const std::vector<std::pair<std::string, int>>& players)
+{
+    std::vector<std::string> red_team, blue_team;
+    std::vector<std::pair<std::string, int>> sorted_players = players;
+    std::sort(sorted_players.begin(), sorted_players.end(), 
+        [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) 
+	{
+            return a.second > b.second;
+        });
+    for (size_t i = 0; i < sorted_players.size(); i++)
+    {
+        if (i % 4 == 0 || i % 4 == 3) 
+	{
+            red_team.push_back(sorted_players[i].first);
+        }
+	else 
+	{
+            blue_team.push_back(sorted_players[i].first);
+        }
+    }
+    return std::make_pair(red_team, blue_team);
+}
+void ServerLobby::handleRPSCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args)
+{
+    if (args.size() < 2)
+    {
+        std::string msg = "Usage: /rps [playername] or /rps [r/p/s] or /rps accept";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+
+    uint32_t peer_id = peer->getHostId();
+    std::string player_name;
+
+    for (auto& player : peer->getPlayerProfiles())
+    {
+        player_name = StringUtils::wideToUtf8(player->getName());
+        break;
+    }
+
+    std::string arg_lower = args[1];
+    std::transform(arg_lower.begin(), arg_lower.end(), arg_lower.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+
+    if (arg_lower == "accept" || arg_lower == "a")
+    {
+        for (auto& challenge : m_rps_challenges)
+        {
+            if (challenge.challenged_id == peer_id && !challenge.accepted)
+            {
+                challenge.accepted = true;
+                challenge.timeout = StkTime::getMonoTimeMs() + 20000; // 20 seconds to choose
+
+                std::shared_ptr<STKPeer> challenger_peer = NULL;
+                for (auto& p : STKHost::get()->getPeers())
+                {
+                    if (p->getHostId() == challenge.challenger_id)
+                    {
+                        challenger_peer = p;
+                        break;
+                    }
+                }
+
+                if (challenger_peer)
+                {
+                    std::string msg = player_name + " accepted your Rock Paper Scissors challenge! You have 10 seconds to choose /rps rock (r), /rps paper (p), or /rps scissors (s).";
+                    sendStringToPeer(msg, challenger_peer);
+                }
+
+                std::string msg = "You accepted the Rock Paper Scissors challenge from " + challenge.challenger_name + "! You have 10 seconds to choose /rps rock (r), /rps paper (p), or /rps scissors (s).";
+                sendStringToPeer(msg, peer);
+                return;
+            }
+        }
+
+        std::string msg = "You don't have any pending Rock Paper Scissors challenges.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+
+    // Handle full names and abbreviations
+    std::string choice = "";
+    if (arg_lower == "rock" || arg_lower == "r")
+        choice = "rock";
+    else if (arg_lower == "paper" || arg_lower == "p")
+        choice = "paper";
+    else if (arg_lower == "scissors" || arg_lower == "s")
+        choice = "scissors";
+
+    if (!choice.empty())
+    {
+        for (auto& challenge : m_rps_challenges)
+        {
+            if (challenge.accepted)
+            {
+                if (challenge.challenger_id == peer_id && challenge.challenger_choice.empty())
+                {
+                    challenge.challenger_choice = choice;
+                    std::string msg = "You chose " + choice + "! Waiting for your opponent...";
+                    sendStringToPeer(msg, peer);
+
+                    if (!challenge.challenged_choice.empty())
+                    {
+                        determineRPSWinner(challenge);
+                    }
+                    return;
+                }
+                else if (challenge.challenged_id == peer_id && challenge.challenged_choice.empty())
+                {
+                    challenge.challenged_choice = choice;
+                    std::string msg = "You chose " + choice + "! Waiting for your opponent...";
+                    sendStringToPeer(msg, peer);
+
+                    if (!challenge.challenger_choice.empty())
+                    {
+                        determineRPSWinner(challenge);
+                    }
+                    return;
+                }
+            }
+        }
+
+        std::string msg = "You don't have any active Rock Paper Scissors games.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+
+    // Handle /rps [playername] - challenge a player
+    std::string target_name = args[1];
+    std::shared_ptr<STKPeer> target_peer = NULL;
+    uint32_t target_id = 0;
+    bool found = false;
+
+    // Case-insensitive player name search
+    for (auto& p : STKHost::get()->getPeers())
+    {
+        for (auto& player_profile : p->getPlayerProfiles())
+        {
+            std::string name = StringUtils::wideToUtf8(player_profile->getName());
+            std::string name_lower = name;
+            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                          [](unsigned char c){ return std::tolower(c); });
+
+            std::string target_lower = target_name;
+            std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(),
+                          [](unsigned char c){ return std::tolower(c); });
+
+            if (name_lower == target_lower)
+            {
+                target_peer = p;
+                target_id = p->getHostId();
+                target_name = name; // Use the actual name with proper case
+                found = true;
+                break;
+            }
+        }
+        if (found) break;
+    }
+
+    if (!found || !target_peer)
+    {
+        std::string msg = "Player " + target_name + " not found.";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+
+    if (target_id == peer_id)
+    {
+        std::string msg = "You can't challenge yourself!";
+        sendStringToPeer(msg, peer);
+        return;
+    }
+
+    for (auto& challenge : m_rps_challenges)
+    {
+        if ((challenge.challenger_id == peer_id && challenge.challenged_id == target_id) ||
+            (challenge.challenger_id == target_id && challenge.challenged_id == peer_id))
+        {
+            std::string msg = "There's already a Rock Paper Scissors challenge between you and " + target_name + ".";
+            sendStringToPeer(msg, peer);
+            return;
+        }
+    }
+
+    RPSChallenge challenge;
+    challenge.challenger_id = peer_id;
+    challenge.challenged_id = target_id;
+    challenge.challenger_name = player_name;
+    challenge.challenged_name = target_name;
+    challenge.challenger_choice = "";
+    challenge.challenged_choice = "";
+    challenge.timeout = StkTime::getMonoTimeMs() + 40000; // 40 seconds to accept
+    challenge.accepted = false;
+
+    m_rps_challenges.push_back(challenge);
+
+    std::string msg = "You challenged " + target_name + " to Rock Paper Scissors!";
+    sendStringToPeer(msg, peer);
+
+    msg = player_name + " challenged you to Rock Paper Scissors! Type /rps accept to play.";
+    sendStringToPeer(msg, target_peer);
+}
+void ServerLobby::checkRPSTimeouts()
+{
+    uint64_t current_time = StkTime::getMonoTimeMs();
+    for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end(); )
+    {
+        if (current_time > it->timeout)
+        {
+            std::shared_ptr<STKPeer> challenger_peer = NULL;
+            std::shared_ptr<STKPeer> challenged_peer = NULL;
+            for (auto& p : STKHost::get()->getPeers())
+            {
+                if (p->getHostId() == it->challenger_id)
+                    challenger_peer = p;
+                else if (p->getHostId() == it->challenged_id)
+                    challenged_peer = p;   
+                if (challenger_peer && challenged_peer)
+                    break;
+            }
+            if (!it->accepted)
+            {
+                if (challenger_peer)
+                {
+                    std::string msg = it->challenged_name + " didn't accept your Rock Paper Scissors challenge.";
+                    sendStringToPeer(msg, challenger_peer);
+                }   
+                it = m_rps_challenges.erase(it);
+            }
+            else if (it->challenger_choice.empty() && it->challenged_choice.empty())
+            {
+                std::string msg = "Rock Paper Scissors game timed out. Neither player made a choice.";
+                if (challenger_peer)
+                    sendStringToPeer(msg, challenger_peer);
+                if (challenged_peer)
+                    sendStringToPeer(msg, challenged_peer);   
+                it = m_rps_challenges.erase(it);
+            }
+            else if (it->challenger_choice.empty())
+            {
+                if (challenged_peer)
+                {
+                    std::string msg = "You win the Rock Paper Scissors game by default! " + it->challenger_name + " didn't make a choice.";
+                    sendStringToPeer(msg, challenged_peer);
+                }
+                if (challenger_peer)
+                {
+                    std::string msg = "You lost the Rock Paper Scissors game by default! You didn't make a choice in time.";
+                    sendStringToPeer(msg, challenger_peer);
+                }   
+                it = m_rps_challenges.erase(it);
+            }
+            else if (it->challenged_choice.empty())
+            {
+                if (challenger_peer)
+                {
+                    std::string msg = "You win the Rock Paper Scissors game by default! " + it->challenged_name + " didn't make a choice.";
+                    sendStringToPeer(msg, challenger_peer);
+                }
+                if (challenged_peer)
+                {
+                    std::string msg = "You lost the Rock Paper Scissors game by default! You didn't make a choice in time.";
+                    sendStringToPeer(msg, challenged_peer);
+                }   
+                it = m_rps_challenges.erase(it);
+            }
+            else
+            {
+                it = m_rps_challenges.erase(it);
+            }
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+void ServerLobby::determineRPSWinner(RPSChallenge& challenge)
+{
+    std::shared_ptr<STKPeer> challenger_peer = NULL;
+    std::shared_ptr<STKPeer> challenged_peer = NULL;
+    for (auto& p : STKHost::get()->getPeers())
+    {
+        if (p->getHostId() == challenge.challenger_id)
+            challenger_peer = p;
+        else if (p->getHostId() == challenge.challenged_id)
+            challenged_peer = p;
+        
+        if (challenger_peer && challenged_peer)
+            break;
+    }
+    if (challenge.challenger_choice == challenge.challenged_choice)
+    {
+        std::string result = "It's a tie! Both players chose " + challenge.challenger_choice + ".";
+        
+        if (challenger_peer)
+            sendStringToPeer(result, challenger_peer);
+        
+        if (challenged_peer)
+            sendStringToPeer(result, challenged_peer);
+    }
+    else if ((challenge.challenger_choice == "rock" && challenge.challenged_choice == "scissors") ||
+             (challenge.challenger_choice == "paper" && challenge.challenged_choice == "rock") ||
+             (challenge.challenger_choice == "scissors" && challenge.challenged_choice == "paper"))
+    {
+        if (challenger_peer)
+        {
+            std::string result = "You win! You chose " + challenge.challenger_choice + " and " + 
+                                challenge.challenged_name + " chose " + challenge.challenged_choice + ".";
+            sendStringToPeer(result, challenger_peer);
+        }
+        if (challenged_peer)
+        {
+            std::string result = "You lose! You chose " + challenge.challenged_choice + " and " + 
+                                challenge.challenger_name + " chose " + challenge.challenger_choice + ".";
+            sendStringToPeer(result, challenged_peer);
+        }
+    }
+    else
+    {
+        if (challenger_peer)
+        {
+            std::string result = "You lose! You chose " + challenge.challenger_choice + " and " + 
+                                challenge.challenged_name + " chose " + challenge.challenged_choice + ".";
+            sendStringToPeer(result, challenger_peer);
+        }   
+        if (challenged_peer)
+        {
+            std::string result = "You win! You chose " + challenge.challenged_choice + " and " + 
+                                challenge.challenger_name + " chose " + challenge.challenger_choice + ".";
+            sendStringToPeer(result, challenged_peer);
+        }
+    }
+    for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end(); ++it)
+    {
+        if (it->challenger_id == challenge.challenger_id && it->challenged_id == challenge.challenged_id)
+        {
+            m_rps_challenges.erase(it);
+            break;
+        }
+    }
+}
+// -- 
+void ServerLobby::loadJumbleWordList()
+{
+    const std::string filename = "wordlist.txt";
+    std::ifstream file(filename);
+    
+    m_jumble_word_list.clear();
+    
+    if (file.is_open())
+    {
+        std::string word;
+        while (std::getline(file, word))
+        {
+            if (word.empty() || word.length() < 3)
+                continue;
+                
+            size_t start = word.find_first_not_of(" \t\n\r");
+            if (start == std::string::npos)
+                continue;
+                
+            size_t end = word.find_last_not_of(" \t\n\r");
+            word = word.substr(start, end - start + 1);
+            
+            for (char& c : word)
+                c = std::tolower(c);
+            
+            bool valid = true;
+            for (char c : word)
+            {
+                if (c < 'a' || c > 'z')
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            
+            if (valid)
+                m_jumble_word_list.push_back(word);
+        }
+        
+        file.close();
+        
+        Log::info("ServerLobby", "Successfully loaded %d words from %s.",
+                 (int)m_jumble_word_list.size(), filename.c_str());
+    }
+    else
+    {
+        Log::warn("ServerLobby", "Could not open word list file: %s", filename.c_str());
+    }
+}
+
+std::string ServerLobby::jumbleWord(const std::string& word)
+{
+    std::string jumbled = word;
+    if (word.length() <= 1) return word;
+    int attempts = 0;
+    const int max_attempts = 5;
+    do 
+    {
+        std::shuffle(jumbled.begin(), jumbled.end(), m_jumble_rng);
+        attempts++;
+    } 
+    while (jumbled == word && attempts < max_attempts);
+    if (jumbled == word) 
+    {
+        std::shuffle(jumbled.begin(), jumbled.end(), m_jumble_rng);
+    }
+    return jumbled;
+}
+void ServerLobby::startJumbleForPlayer(uint32_t player_id)
+{
+    if (m_jumble_word_list.empty()) return;
+    std::uniform_int_distribution<size_t> dist(0, m_jumble_word_list.size() - 1);
+    std::string correct_word = m_jumble_word_list[dist(m_jumble_rng)];
+    std::string jumbled_word = jumbleWord(correct_word);
+    if (correct_word == jumbled_word && correct_word.length() > 1)
+    {
+        jumbled_word = jumbleWord(correct_word);
+        if (correct_word == jumbled_word)
+        {
+            return;
+        }
+    }
+    m_jumble_player_words[player_id] = correct_word;
+    m_jumble_player_jumbled[player_id] = jumbled_word;
+    m_jumble_player_start_time[player_id] = StkTime::getMonoTimeMs();
+    std::string announcement = "Unscramble this word: " + jumbled_word;
+    for (auto& p : STKHost::get()->getPeers())
+    {
+        if (p->getHostId() == player_id)
+        {
+            sendStringToPeer(announcement, p);
+            break;
+        }
+    }
+}
+
+void ServerLobby::endJumbleForPlayer(uint32_t player_id, bool won)
+{
+    auto it_word = m_jumble_player_words.find(player_id);
+    if (it_word == m_jumble_player_words.end()) return;
+    std::string correct_word = it_word->second;
+    std::shared_ptr<STKPeer> peer = nullptr;
+    for (auto& p : STKHost::get()->getPeers())
+    {
+        if (p->getHostId() == player_id)
+        {
+            peer = p;
+            break;
+        }
+    }
+    if (!peer) return;
+    if (won)
+    {
+        std::string msg = "Well done! You correctly unscrambled the word: " + correct_word;
+        sendStringToPeer(msg, peer);
+    }
+    else
+    {
+        std::string msg = "Time's up! The word was: " + correct_word;
+        sendStringToPeer(msg, peer);
+    }
+    m_jumble_player_words.erase(player_id);
+    m_jumble_player_jumbled.erase(player_id);
+    m_jumble_player_start_time.erase(player_id);
+}
+
+void ServerLobby::handleJumbleCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args)
+{
+    uint32_t peer_id = peer->getHostId();
+    std::string player_name;
+    for (auto& player : peer->getPlayerProfiles())
+    {
+        player_name = StringUtils::wideToUtf8(player->getName());
+        break;
+    }
+    std::lock_guard<std::mutex> lock(m_jumble_mutex);
+    if (args.size() < 2)
+    {
+        auto it_jumbled = m_jumble_player_jumbled.find(peer_id);
+        if (it_jumbled != m_jumble_player_jumbled.end())
+        {
+            std::string msg = "Current word to unscramble: " + it_jumbled->second;
+            sendStringToPeer(msg, peer);
+        }
+        else
+        {
+            startJumbleForPlayer(peer_id);
+        }
+        return;
+    }
+    std::string guess = args[1];
+    std::transform(guess.begin(), guess.end(), guess.begin(),
+                  [](unsigned char c){ return std::tolower(c); });
+    auto it_word = m_jumble_player_words.find(peer_id);
+    if (it_word != m_jumble_player_words.end())
+    {
+        if (guess == it_word->second)
+        {
+            endJumbleForPlayer(peer_id, true);
+        }
+        else
+        {
+            std::string msg = "Sorry, '" + guess + "' is not correct. Try again!";
+            sendStringToPeer(msg, peer);
+        }
+    }
+    else
+    {
+        startJumbleForPlayer(peer_id);
+    }
 }
