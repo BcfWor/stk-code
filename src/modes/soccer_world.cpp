@@ -36,7 +36,6 @@
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
 #include "network/server_config.hpp"
-#include "network/tournament/tournament_manager.hpp"
 #include "physics/physics.hpp"
 #include "states_screens/race_gui_base.hpp"
 #include "tracks/check_goal.hpp"
@@ -1425,28 +1424,6 @@ void SoccerWorld::getKartsDisplayInfo(
         }
     }
 }   // getKartsDisplayInfo
-
-// ----------------------------------------------------------------------------
-// SuperTournament
-// ----------------------------------------------------------------------------
-void SoccerWorld::stop()
-{
-    m_stopped = true;
-    Log::info("SoccerWorld", "The game is stopped.");
-
-    m_backup_red_scorers = m_red_scorers;
-    m_backup_blue_scorers = m_blue_scorers;
-    m_backup_reset_ball_ticks = m_reset_ball_ticks;
-    m_backup_ticks_back_to_own_goal = m_ticks_back_to_own_goal;
-}
-
-// ----------------------------------------------------------------------------
-void SoccerWorld::resume()
-{
-    m_stopped = false;
-    Log::info("SoccerWorld", "The game is resumed.");
-}
-
 // ----------------------------------------------------------------------------
 void SoccerWorld::setInitialCount(int red, int blue)
 {

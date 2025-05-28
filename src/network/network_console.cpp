@@ -28,7 +28,6 @@
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
 #include "network/protocols/server_lobby.hpp"
-#include "network/tournament/tournament_manager.hpp"
 #include "utils/time.hpp"
 #include "utils/vs.hpp"
 #include "modes/world.hpp"
@@ -640,207 +639,6 @@ void mainLoop(STKHost* host)
                 sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_ADMINISTRATOR);
             std::cout << "Set " << str2 << " as administrator (100)." << std::endl;
         }
-        // SuperTournament Reborn Commands
-        else if (str == "setreferee" && !str2.empty() &&
-                NetworkConfig::get()->isServer())
-        {
-            auto sl = LobbyProtocol::get<ServerLobby>();
-            if (!sl)
-                continue;
-
-            auto player = STKHost::get()->findPeerByName(
-                StringUtils::utf8ToWide(str2)
-            );
-
-            if (player)
-            {
-                player->getPlayerProfiles()[0]->setPermissionLevel(
-                        ServerPermissionLevel::PERM_REFEREE);
-            }
-            uint32_t oid = sl->lookupOID(str2);
-            if (!oid)
-            {
-                std::cout << "Player has no recorded online id, changes are temporary." << std::endl;
-            }
-            else
-                sl->writePermissionLevelForOID(oid, ServerPermissionLevel::PERM_REFEREE);
-            std::cout << "Set " << str2 << " as referee (" << ServerPermissionLevel::PERM_REFEREE << ")." << std::endl;
-        }
-        else if (ServerConfig::m_supertournament && str == "yellow" && !str2.empty() &&
-                NetworkConfig::get()->isServer())
-        {
-            auto sl = LobbyProtocol::get<ServerLobby>();
-            if (!sl)
-                continue;
-
-            const std::string cmd = ss.str();
-            const char* wrong_usage = "Format: yellow player_name reason";
-            std::string msg = str2 + " was shown a yellow card by the Referee. Reason: ";
-            std::string reason = cmd.substr(std::min(8 + str2.length(), cmd.length()));
-            if (reason.empty())
-            {
-                std::cout << wrong_usage << std::endl;
-                continue;
-            }
-            msg += reason;
-            Log::info("TournamentManager", "yellow %s %s", str2.c_str(), reason.c_str());
-            sl->sendStringToAllPeers(msg);
-#if 0
-            std::string cmd = "python3 supertournament_yellow.py " + argv[1] + " &";
-            system(cmd.c_str());
-#endif
-        }
-        else if (ServerConfig::m_supertournament && str == "teams" && !str2.empty() &&
-                NetworkConfig::get()->isServer())
-        {
-            const char* wrong_usage = "Format: teams red_team blue_team";
-
-            auto sl = LobbyProtocol::get<ServerLobby>();
-            if (!sl)
-                continue;
-            
-            std::string str3;
-            ss >> str3;
-            if (ss.bad() || ss.fail() || str2 == str3)
-            {
-                std::cout << wrong_usage << std::endl;
-                continue;
-            }
-
-            sl->updateTournamentTeams(str2, str3);
-            std::cout << "Red team: " << str2 << " / Blue team: " << str3 << std::endl;
-        }
-        else if (ServerConfig::m_supertournament && str == "game" &&
-                NetworkConfig::get()->isServer())
-        {
-            auto sl = LobbyProtocol::get<ServerLobby>();
-            if (!sl)
-                continue;
-
-            int game;
-            if (str2.empty())
-                game = -1;
-            else
-                game = std::stoi(str2);
-            int minutes = -1;
-            std::string str_minutes_or_reset;
-            ss >> str_minutes_or_reset;
-            if (ss.bad() || ss.fail())
-            {
-                str_minutes_or_reset.clear();
-            }
-
-            if (str_minutes_or_reset == "reset")
-            {
-                TournamentManager::get()->ResetGame(game);
-                std::cout << "Game has been reset." << std::endl;
-                continue;
-            }
-            else if (!str_minutes_or_reset.empty())
-                minutes = std::stoi(str_minutes_or_reset);
-
-            bool ok = game > 0 && game <= TournamentManager::get()->GetMaxGames();
-            if (!str_minutes_or_reset.empty())
-                ok &= minutes > 0 && minutes <= 15;
-            
-            if (game != -1 && !ok)
-            {
-                std::cout << "Please specify a correct number. Format: game n minutes" << std::endl;
-                continue;
-            }
-            if (TournamentManager::get()->GameOpen())
-            {
-                std::cout << "There is still a game in progress. Play the additional time,"
-                    " or use /gameend to force terminating it." << std::endl;
-                continue;
-            }
-            else if (game != -1 && TournamentManager::get()->GameDone(game))
-            {
-                if (minutes > 0)
-                {
-                    std::cout << minutes << " additional minutes will be played for already completed game " << game << "." << std::endl;
-                    TournamentManager::get()->AddAdditionalSeconds(game , minutes * 60);
-                }
-                else
-                {
-                    std::cout << "Game " << game << " has already been played. Use \"game " << game << " [time]\" to play some additional time. To restart and overwrite the game, use \"game " << game << " reset\"." << std::endl;
-                }
-                continue;
-            }
-            else if (game < 1)
-            {
-                std::cout << "Starting next game" << std::endl;
-                TournamentManager::get()->StartNextGame(true);
-            }
-            else if (minutes <= 0)
-            {
-                std::cout << "Automatically assuming the length of the game." << std::endl;
-                TournamentManager::get()->StartGame(game, true);
-            }
-            else
-            {
-                TournamentManager::get()->StartGame(game, minutes * 60, true);
-            }
-        }
-        else if (ServerConfig::m_supertournament && str == "gameend" &&
-                NetworkConfig::get()->isServer())
-        {
-            auto sl = LobbyProtocol::get<ServerLobby>();
-            if (!sl)
-                continue;
-
-            if (sl->getCurrentState() != ServerLobby::WAITING_FOR_START_GAME)
-            {
-                std::cout << "Game is currently active. End it with \"end\", and run this command again." << std::endl;
-                continue;
-            }
-            TournamentManager::get()->ForceEndGame();
-            std::cout << "Tournament game has marked as ended." << std::endl;
-        }
-        else if (ServerConfig::m_supertournament && str == "referee" &&
-                !str2.empty() && NetworkConfig::get()->isServer())
-        {
-            TournamentManager::get()->SetReferee(str2);
-            std::cout << "Recorded referee for the matchplan." << std::endl;
-        }
-        else if (ServerConfig::m_supertournament && str == "video" &&
-                !str2.empty() && NetworkConfig::get()->isServer())
-        {
-            TournamentManager::get()->SetVideo(str2);
-            std::cout << "Recorded footage URL for the matchplan." << std::endl;
-        }
-        else if (ServerConfig::m_supertournament && str == "stop" &&
-                NetworkConfig::get()->isServer())
-        {
-            World* w = World::getWorld();
-            if (!w)
-                continue;
-            TournamentManager::get()->StopGame(w->getElapsedTime());
-            w->stop();
-        }
-        else if (ServerConfig::m_supertournament && str == "go" &&
-                NetworkConfig::get()->isServer())
-        {
-            World* w = World::getWorld();
-            if (!w)
-                continue;
-            TournamentManager::get()->ResumeGame(w->getElapsedTime());
-            w->resume();
-        }
-        else if (ServerConfig::m_supertournament && str == "init" && !str2.empty() &&
-                NetworkConfig::get()->isServer())
-        {
-            int red = std::stoi(str2), blue = 0;
-
-            ss >> blue;
-            if (ss.bad() || ss.fail())
-            {
-                std::cout << "Usage: /init [red_count] [blue_count]" << std::endl;
-                continue;
-            }
-            TournamentManager::get()->SetCurrentResult(red, blue);
-            std::cout << "The game is initialized with result " << red << "-" << blue << std::endl;
-        }
         else if (str == "setperm" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1004,16 +802,6 @@ void mainLoop(STKHost* host)
                     StringUtils::utf8ToWide(playername), true, true, &t_player);
             if (!t_player || !t_peer || !t_peer->hasPlayerProfiles())
             {
-                if (ServerConfig::m_supertournament)
-                {
-                    if (ServerConfig::m_supertournament)
-                    {
-                        TournamentManager::get()->SetKart(playername,
-                                str2 == "off" ? "" : str2);
-                        std::cout << "Changed kart for offline player " << playername << std::endl;
-                        continue;
-                    }
-                }
                 std::cout << "Invalid target player: " << playername << std::endl;
                 continue;
             }
@@ -1030,8 +818,6 @@ void mainLoop(STKHost* host)
 
                 t_player->unforceKart();
                 std::cout << "No longer forcing a kart for " << playername << "." << std::endl;
-                if (ServerConfig::m_supertournament)
-                    TournamentManager::get()->SetKart(playername, "");
             }
             else
             {
@@ -1046,8 +832,6 @@ void mainLoop(STKHost* host)
                 t_player->forceKart(str2);
                 std::cout << "Made " <<StringUtils::wideToUtf8(t_player->getName()) <<
                     " use kart " << str2 << "." << std::endl;
-                if (ServerConfig::m_supertournament)
-                    TournamentManager::get()->SetKart(playername, str2);
             }
 
         }

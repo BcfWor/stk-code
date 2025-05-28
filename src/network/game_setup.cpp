@@ -20,7 +20,6 @@
 
 #include "config/player_manager.hpp"
 #include "config/user_config.hpp"
-#include "network/tournament/tournament_manager.hpp"
 #include <limits>
 #ifdef DEBUG
 #include "network/network_config.hpp"
@@ -127,13 +126,6 @@ void GameSetup::loadWorld()
 
         if (RaceManager::get()->isSoccerMode())
         {
-#if 0
-            if (ServerConfig::m_supertournament && TournamentManager::get()->GameInitialized())
-            {
-                RaceManager::get()->setTimeTarget(TournamentManager::get()->GetAdditionalSeconds());
-            }
-            else 
-#endif
             if (isSoccerGoalTarget())
                 RaceManager::get()->setMaxGoal(m_laps);
             else
@@ -191,12 +183,7 @@ void GameSetup::addServerInfo(NetworkString* ns)
         // No extra server info
         ns->addUInt8((uint8_t)0);
     }
-    if (ServerConfig::m_supertournament)
-    {
-        ns->addUInt8(ServerConfig::m_min_start_game_players)
-            .addFloat(std::numeric_limits<float>::max());
-    }
-    else if (ServerConfig::m_owner_less)
+    if (ServerConfig::m_owner_less)
     {
         ns->addUInt8(ServerConfig::m_min_start_game_players)
             .addFloat(ServerConfig::m_start_game_counter);

@@ -102,7 +102,7 @@ protected:
     /** Process type of this world (main or child). */
     const ProcessType m_process_type;
 
-    /** SuperTournament: if game is stopped, don't account anything... */
+    /** if game is stopped, don't account anything... */
     bool        m_stopped;
 
 private:

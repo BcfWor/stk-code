@@ -93,58 +93,6 @@ namespace ServerConfig
         "characters."));
 
         // ----Server Config Variables
-    SERVER_CFG_PREFIX BoolServerConfigParam m_supertournament
-        SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "supertournament",
-                    "supertournament"));
-    SERVER_CFG_PREFIX StringServerConfigParam m_gameplan_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "supertournament_gameplan.txt",
-                    "gameplan-file", "Path to the gameplan file. "
-                    "Defines amount of games per match, game duration, "
-                    "selectable fields or forces a certain field."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_tourn_required_fields_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "supertournament_required_fields.txt",
-                    "tourn-required-fields-path",
-                    "Path to the file that contains required fields. "
-                    "Players without said fields won't be"
-                    " able to play the game."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_tourn_semi_required_fields_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "supertournament_semi_required_fields.txt",
-                    "tourn-semi-required-fields-path",
-                    "Path to the file that contains required fields. "
-                    "Players that have less than their amount minus the "
-                    "'tourn-semi-required-fields-minus'"
-                    " won't be"
-                    " able to play the game."));
-    SERVER_CFG_PREFIX IntServerConfigParam m_tourn_semi_required_fields_minus
-        SERVER_CFG_DEFAULT(IntServerConfigParam(1,
-                    "tourn-semi-required-fields-minus",
-                    "Amount of fields that could be forgiven "
-                    "for not being installed in semi-required fields."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_matchplan_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "supertournament_matchplan.txt",
-                    "matchplan-file", "Path to the matchplan file. "
-                    "Defines scheduled matches and their results."));
-    SERVER_CFG_PREFIX BoolServerConfigParam m_update_matchplan
-        SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "update-matchplan",
-                    "If set to true, matchplan will be updated"
-                    " once the game ends."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_teams_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam("supertournament_teams.txt",
-                    "teams-file", "Path to the teams file."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_tourn_log
-        SERVER_CFG_DEFAULT(StringServerConfigParam("supertournament_log.txt", 
-                    "tourn-log-file",
-                    "File where to log the supertournament game results."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_red_team
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "", "red-team", "Tournament team of red players."));
-    SERVER_CFG_PREFIX StringServerConfigParam m_blue_team
-        SERVER_CFG_DEFAULT(StringServerConfigParam(
-                    "", "blue-team", "Tournament team of blue players."));
     SERVER_CFG_PREFIX IntServerConfigParam m_fixed_lap_count
         SERVER_CFG_DEFAULT(IntServerConfigParam(
                     -1, "fixed-lap-count","fixed-lap-count"));
@@ -283,8 +231,8 @@ namespace ServerConfig
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_ranking_path
 	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
 
-    SERVER_CFG_PREFIX StringServerConfigParam m_ranked_script_path
-	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.py", "ranked-script-path", "File path to the ranking Python script."));   
+    SERVER_CFG_PREFIX StringServerConfigParam m_update_script_path
+	SERVER_CFG_DEFAULT(StringServerConfigParam("update.py", "update-script-path", "File path to the update script."));   
 
     SERVER_CFG_PREFIX StringServerConfigParam m_replay_dir
 	    SERVER_CFG_DEFAULT(StringServerConfigParam("replay/", "replay-directory", "Directory path for storing replay files."));
@@ -691,6 +639,15 @@ namespace ServerConfig
         "Usually 0 is for regular player, 80 is for moderator, 100 is for "
         "administrator. Note that the server owner basically has infinite "
         "permission level."));
+
+    SERVER_CFG_PREFIX BoolServerConfigParam m_ishigami_enabled
+        SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "ishigami",
+        "Enable linaSTK's stk-seen feature. Requires the ishigami server "
+        "and linaSTK to be installed and running on local or remote server."));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_ishigami_address
+        SERVER_CFG_DEFAULT(StringServerConfigParam("http://127.0.0.1:8000", "ishigami-address",
+        "Address of the ishigami server."));
 
     SERVER_CFG_PREFIX StringServerConfigParam m_restrictions_table
         SERVER_CFG_DEFAULT(StringServerConfigParam("restrictions",
