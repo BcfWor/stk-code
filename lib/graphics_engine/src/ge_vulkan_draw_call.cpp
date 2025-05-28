@@ -10,8 +10,10 @@
 #include "ge_vulkan_driver.hpp"
 #include "ge_vulkan_dynamic_buffer.hpp"
 #include "ge_vulkan_dynamic_spm_buffer.hpp"
+#include "ge_vulkan_environment_map.hpp"
 #include "ge_vulkan_fbo_texture.hpp"
 #include "ge_vulkan_features.hpp"
+#include "ge_vulkan_light_handler.hpp"
 #include "ge_vulkan_mesh_cache.hpp"
 #include "ge_vulkan_mesh_scene_node.hpp"
 #include "ge_vulkan_shader_manager.hpp"
@@ -20,6 +22,7 @@
 
 #include "mini_glm.hpp"
 #include "IBillboardSceneNode.h"
+#include "ILightSceneNode.h"
 #include "IParticleSystemSceneNode.h"
 
 #include <algorithm>
@@ -202,6 +205,7 @@ GEVulkanDrawCall::GEVulkanDrawCall()
                 : m_limits(getVKDriver()->getPhysicalDeviceProperties().limits)
 {
     m_culling_tool = new GECullingTool;
+    m_light_handler = NULL;
     m_dynamic_data = NULL;
     m_sbo_data = NULL;
     m_object_data_padded_size = 0;
@@ -221,6 +225,7 @@ GEVulkanDrawCall::GEVulkanDrawCall()
 GEVulkanDrawCall::~GEVulkanDrawCall()
 {
     delete m_culling_tool;
+    delete m_light_handler;
     delete m_dynamic_data;
     delete m_sbo_data;
     for (auto& p : m_billboard_buffers)
@@ -318,6 +323,9 @@ void GEVulkanDrawCall::generate(GEVulkanDriver* vk)
 {
     if (!m_visible_nodes.empty() && m_data_layout == VK_NULL_HANDLE)
         createVulkanData();
+
+    if (m_light_handler)
+         m_light_handler->generate(m_view_position, m_skybox_renderer);
 
     using Nodes = std::pair<std::pair<GESPMBuffer*, TexturesList>, std::unordered_map<
         std::string, std::vector<std::pair<irr::scene::ISceneNode*, int
@@ -840,8 +848,12 @@ std::string GEVulkanDrawCall::getShader(const irr::video::SMaterial& m)
 void GEVulkanDrawCall::prepare(GEVulkanCameraSceneNode* cam)
 {
     reset();
+    if (getGEConfig()->m_pbr && m_light_handler == NULL)
+        m_light_handler = new GEVulkanLightHandler(getVKDriver());
+    if (m_light_handler)
+        m_light_handler->prepare();
     m_culling_tool->init(cam);
-    m_view_position = cam->getPosition();
+    m_view_position = cam->getAbsolutePosition();
     m_billboard_rotation = MiniGLM::getBulletQuaternion(cam->getViewMatrix());
 }   // prepare
 
@@ -853,6 +865,8 @@ void GEVulkanDrawCall::createAllPipelines(GEVulkanDriver* vk)
     settings.m_depth_test = true;
     settings.m_depth_write = true;
     settings.m_backface_culling = true;
+    settings.m_depth_op = VK_COMPARE_OP_LESS;
+    settings.m_vertex_description = getDefaultVertexDescription();
 
     settings.m_vertex_shader = "spm.vert";
     settings.m_skinning_vertex_shader = "spm_skinning.vert";
@@ -919,7 +933,9 @@ void GEVulkanDrawCall::createAllPipelines(GEVulkanDriver* vk)
 
     settings.m_alphablend = false;
     settings.m_additive = false;
-    settings.m_fs_quad_pl = m_skybox_layout;
+    settings.m_custom_pl = m_skybox_layout;
+    settings.m_depth_op = VK_COMPARE_OP_EQUAL;
+    settings.m_vertex_description = {};
     settings.m_backface_culling = true;
     settings.m_skinning_vertex_shader = "";
     settings.m_vertex_shader = "fullscreen_quad.vert";
@@ -950,58 +966,15 @@ void GEVulkanDrawCall::createPipeline(GEVulkanDriver* vk,
         frag_shader_stage_info
     }};
 
-    size_t bone_pitch = sizeof(int16_t) * 8;
-    size_t static_pitch = sizeof(irr::video::S3DVertexSkinnedMesh) - bone_pitch;
-    std::array<VkVertexInputBindingDescription, 2> binding_descriptions;
-    binding_descriptions[0].binding = 0;
-    binding_descriptions[0].stride = static_pitch;
-    binding_descriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    binding_descriptions[1].binding = 1;
-    binding_descriptions[1].stride = bone_pitch;
-    binding_descriptions[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    std::array<VkVertexInputAttributeDescription, 8> attribute_descriptions = {};
-    attribute_descriptions[0].binding = 0;
-    attribute_descriptions[0].location = 0;
-    attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attribute_descriptions[0].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_position);
-    attribute_descriptions[1].binding = 0;
-    attribute_descriptions[1].location = 1;
-    attribute_descriptions[1].format = VK_FORMAT_A2B10G10R10_SNORM_PACK32;
-    attribute_descriptions[1].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_normal);
-    attribute_descriptions[2].binding = 0;
-    attribute_descriptions[2].location = 2;
-    attribute_descriptions[2].format = VK_FORMAT_A8B8G8R8_UNORM_PACK32;
-    attribute_descriptions[2].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_color);
-    attribute_descriptions[3].binding = 0;
-    attribute_descriptions[3].location = 3;
-    attribute_descriptions[3].format = VK_FORMAT_R16G16_SFLOAT;
-    attribute_descriptions[3].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_all_uvs);
-    attribute_descriptions[4].binding = 0;
-    attribute_descriptions[4].location = 4;
-    attribute_descriptions[4].format = VK_FORMAT_R16G16_SFLOAT;
-    attribute_descriptions[4].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_all_uvs) + (sizeof(int16_t) * 2);
-    attribute_descriptions[5].binding = 0;
-    attribute_descriptions[5].location = 5;
-    attribute_descriptions[5].format = VK_FORMAT_A2B10G10R10_SNORM_PACK32;
-    attribute_descriptions[5].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_tangent);
-    attribute_descriptions[6].binding = 1;
-    attribute_descriptions[6].location = 6;
-    attribute_descriptions[6].format = VK_FORMAT_R16G16B16A16_SINT;
-    attribute_descriptions[6].offset = 0;
-    attribute_descriptions[7].binding = 1;
-    attribute_descriptions[7].location = 7;
-    attribute_descriptions[7].format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    attribute_descriptions[7].offset = sizeof(int16_t) * 4;
-
     VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    if (settings.m_fs_quad_pl == VK_NULL_HANDLE)
+    auto& vertex_desc = settings.m_vertex_description;
+    if (!vertex_desc.first.empty())
     {
-        vertex_input_info.vertexBindingDescriptionCount = 2;
-        vertex_input_info.vertexAttributeDescriptionCount = 8;
-        vertex_input_info.pVertexBindingDescriptions = binding_descriptions.data();
-        vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
+        vertex_input_info.vertexBindingDescriptionCount = vertex_desc.first.size();
+        vertex_input_info.vertexAttributeDescriptionCount = vertex_desc.second.size();
+        vertex_input_info.pVertexBindingDescriptions = vertex_desc.first.data();
+        vertex_input_info.pVertexAttributeDescriptions = vertex_desc.second.data();
     }
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
@@ -1048,8 +1021,7 @@ void GEVulkanDrawCall::createPipeline(GEVulkanDriver* vk,
     depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depth_stencil.depthTestEnable = settings.m_depth_test;
     depth_stencil.depthWriteEnable = settings.m_depth_write;
-    depth_stencil.depthCompareOp = settings.m_fs_quad_pl == VK_NULL_HANDLE ?
-        VK_COMPARE_OP_LESS : VK_COMPARE_OP_EQUAL;
+    depth_stencil.depthCompareOp = settings.m_depth_op;
     depth_stencil.depthBoundsTestEnable = VK_FALSE;
     depth_stencil.stencilTestEnable = VK_FALSE;
 
@@ -1110,12 +1082,42 @@ void GEVulkanDrawCall::createPipeline(GEVulkanDriver* vk,
     pipeline_info.pDepthStencilState = &depth_stencil;
     pipeline_info.pColorBlendState = &color_blending;
     pipeline_info.pDynamicState = &dynamic_state_info;
-    pipeline_info.layout = settings.m_fs_quad_pl == VK_NULL_HANDLE ?
-        m_pipeline_layout : settings.m_fs_quad_pl;
+    pipeline_info.layout = settings.m_custom_pl == VK_NULL_HANDLE ?
+        m_pipeline_layout : settings.m_custom_pl;
     pipeline_info.renderPass = vk->getRTTTexture() ?
         vk->getRTTTexture()->getRTTRenderPass() : vk->getRenderPass();
     pipeline_info.subpass = 0;
     pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+
+    struct Constants
+    {
+        VkBool32 m_ibl;
+        float m_specular_levels_minus_one;
+    };
+    Constants constants = {};
+    constants.m_ibl = getGEConfig()->m_pbr && getGEConfig()->m_ibl &&
+        GEVulkanFeatures::supportsComputeInMainQueue() &&
+        m_skybox_renderer != NULL;
+    float ts = GEVulkanEnvironmentMap::getSpecularEnvironmentMapSize().Width;
+    constants.m_specular_levels_minus_one = std::floor(std::log2(ts));
+    std::array<VkSpecializationMapEntry, 2> specialization_entries = {};
+    specialization_entries[0].constantID = 0;
+    specialization_entries[0].offset = offsetof(Constants, m_ibl);
+    specialization_entries[0].size = sizeof(VkBool32);
+    specialization_entries[1].constantID = 1;
+    specialization_entries[1].offset = offsetof(Constants,
+        m_specular_levels_minus_one);
+    specialization_entries[1].size = sizeof(float);
+    VkSpecializationInfo specialization_info = {};
+    specialization_info.mapEntryCount = specialization_entries.size();
+    specialization_info.pMapEntries = specialization_entries.data();
+    specialization_info.dataSize = sizeof(Constants);
+    specialization_info.pData = &constants;
+    if (getGEConfig()->m_pbr)
+    {
+        shader_stages[0].pSpecializationInfo = &specialization_info;
+        shader_stages[1].pSpecializationInfo = &specialization_info;
+    }
 
     shader_stages[0].module = GEVulkanShaderManager::getShader(
         settings.m_vertex_shader);
@@ -1281,16 +1283,26 @@ void GEVulkanDrawCall::createVulkanData()
     skinning_layout_binding.pImmutableSamplers = NULL;
     skinning_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    VkDescriptorSetLayoutBinding light_layout_binding = {};
+    light_layout_binding.binding = 3;
+    light_layout_binding.descriptorCount = 1;
+    light_layout_binding.descriptorType =
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    light_layout_binding.pImmutableSamplers = NULL;
+    light_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
+        VK_SHADER_STAGE_FRAGMENT_BIT;
+
     std::vector<VkDescriptorSetLayoutBinding> bindings =
     {
          camera_layout_binding,
          object_data_layout_binding,
-         skinning_layout_binding
+         skinning_layout_binding,
+         light_layout_binding
     };
     if (GEVulkanFeatures::supportsBindMeshTexturesAtOnce())
     {
         VkDescriptorSetLayoutBinding material_binding = {};
-        material_binding.binding = 3;
+        material_binding.binding = 4;
         material_binding.descriptorCount = 1;
         material_binding.descriptorType =
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
@@ -1319,7 +1331,7 @@ void GEVulkanDrawCall::createVulkanData()
     {
         {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            vk->getMaxFrameInFlight() + 1
+            (vk->getMaxFrameInFlight() + 1) * 2
         },
         {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
@@ -1327,7 +1339,7 @@ void GEVulkanDrawCall::createVulkanData()
         }
     };
     if (GEVulkanFeatures::supportsBindMeshTexturesAtOnce())
-        sizes.push_back(sizes.back());
+        sizes.back().descriptorCount = (vk->getMaxFrameInFlight() + 1) * 3;
 
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1360,11 +1372,16 @@ void GEVulkanDrawCall::createVulkanData()
     }
 
     // m_pipeline_layout
-    std::array<VkDescriptorSetLayout, 2> all_layouts =
-    {{
+    std::vector<VkDescriptorSetLayout> all_layouts =
+    {
         *m_texture_descriptor->getDescriptorSetLayout(),
         m_data_layout
-    }};
+    };
+    if (getGEConfig()->m_pbr)
+    {
+        all_layouts.push_back(
+            vk->getSkyBoxRenderer()->getEnvDescriptorSetLayout());
+    }
 
     VkPipelineLayoutCreateInfo pipeline_layout_info = {};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1389,6 +1406,8 @@ void GEVulkanDrawCall::createVulkanData()
             "vkCreatePipelineLayout failed for m_pipeline_layout");
     }
 
+    all_layouts.resize(2);
+    pipeline_layout_info.setLayoutCount = all_layouts.size();
     all_layouts[0] = vk->getSkyBoxRenderer()->getDescriptorSetLayout();
     result = vkCreatePipelineLayout(vk->getDevice(), &pipeline_layout_info,
         NULL, &m_skybox_layout);
@@ -1421,7 +1440,7 @@ void GEVulkanDrawCall::createVulkanData()
     // Use VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
     // or a staging buffer when buffer is small
     m_dynamic_data = new GEVulkanDynamicBuffer(flags,
-        extra_size + sizeof(GEVulkanCameraUBO),
+        extra_size + sizeof(GEVulkanCameraUBO) + sizeof(GEGlobalLightBuffer),
         GEVulkanDriver::getMaxFrameInFlight() + 1,
         GEVulkanDynamicBuffer::supportsHostTransfer() ? 0 :
         GEVulkanDriver::getMaxFrameInFlight() + 1);
@@ -1453,6 +1472,15 @@ void GEVulkanDrawCall::uploadDynamicData(GEVulkanDriver* vk,
     std::vector<std::pair<void*, size_t> > data_uploading;
     data_uploading.emplace_back((void*)cam->getUBOData(),
         sizeof(GEVulkanCameraUBO));
+
+    size_t sbo_padding = getLightDataOffset() - sizeof(GEVulkanCameraUBO);
+    if (sbo_padding > 0)
+        data_uploading.emplace_back((void*)NULL, sbo_padding);
+    if (m_light_handler)
+    {
+        data_uploading.emplace_back(m_light_handler->getData(),
+            m_light_handler->getSize());
+    }
 
     const bool use_multidraw =
         GEVulkanFeatures::supportsBindMeshTexturesAtOnce();
@@ -1569,7 +1597,14 @@ start:
         0u,
         0u,
         0u,
+        0u,
     };
+    if (getGEConfig()->m_pbr)
+    {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_pipeline_layout, 2, 1,
+            vk->getSkyBoxRenderer()->getEnvDescriptorSet(), 0, NULL);
+    }
     if (bind_mesh_textures)
     {
         if (!bound_mesh_textures_once)
@@ -1579,7 +1614,9 @@ start:
                 m_texture_descriptor->getDescriptorSet(), 0, NULL);
             bound_mesh_textures_once = true;
         }
-        size_t indirect_offset = sizeof(GEVulkanCameraUBO);
+        size_t indirect_offset = getLightDataOffset();
+        if (m_light_handler)
+            indirect_offset += m_light_handler->getSize();
         const size_t indirect_size = sizeof(VkDrawIndexedIndirectCommand);
         unsigned draw_count = 0;
         VkBuffer indirect_buffer =
@@ -1619,7 +1656,7 @@ start:
                 if (bound)
                 {
                     dynamic_offsets[1] = m_dynamic_spm_padded_size;
-                    dynamic_offsets[3] = m_materials_data[cur_pipeline].first;
+                    dynamic_offsets[4] = m_materials_data[cur_pipeline].first;
                     bindDataDescriptor(cmd, current_buffer_idx,
                         dynamic_offsets);
                     vkCmdDrawIndexedIndirect(cmd, indirect_buffer,
@@ -1674,7 +1711,7 @@ start:
         if (bound)
         {
             dynamic_offsets[1] = m_dynamic_spm_padded_size;
-            dynamic_offsets[3] = m_materials_data[m_cmds.back().m_shader].first;
+            dynamic_offsets[4] = m_materials_data[m_cmds.back().m_shader].first;
             bindDataDescriptor(cmd, current_buffer_idx, dynamic_offsets);
             vkCmdDrawIndexedIndirect(cmd, indirect_buffer, indirect_offset,
                 draw_count, indirect_size);
@@ -1682,7 +1719,7 @@ start:
     }
     else
     {
-        dynamic_offsets.resize(3);
+        dynamic_offsets.resize(4);
         bool rebind_base_vertex = true;
         bound = bindPipeline(cmd, cur_pipeline, depth_only, &prev_dp);
         auto it = dynamic_spm_buffers.find(
@@ -1942,6 +1979,26 @@ void GEVulkanDrawCall::updateDataDescriptorSets(GEVulkanDriver* vk)
         data_set[2].descriptorCount = 1;
         data_set[2].pBufferInfo = &sbo_info_skinning;
 
+        VkDescriptorBufferInfo sbo_info_light;
+        if (m_light_handler != NULL)
+        {
+            sbo_info_light.buffer =
+                GEVulkanDynamicBuffer::supportsHostTransfer() ?
+                m_dynamic_data->getHostBuffer()[i] :
+                m_dynamic_data->getLocalBuffer()[i];
+            sbo_info_light.offset = getLightDataOffset();
+            sbo_info_light.range = sizeof(GEGlobalLightBuffer);
+            data_set.push_back({});
+            VkWriteDescriptorSet& ds = data_set.back();
+            ds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            ds.dstSet = m_data_descriptor_sets[i];
+            ds.dstBinding = 3;
+            ds.dstArrayElement = 0;
+            ds.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            ds.descriptorCount = 1;
+            ds.pBufferInfo = &sbo_info_light;
+        }
+
         VkDescriptorBufferInfo sbo_info_material;
         sbo_info_material.buffer =
             m_sbo_data->getHostBuffer()[i];
@@ -1950,15 +2007,15 @@ void GEVulkanDrawCall::updateDataDescriptorSets(GEVulkanDriver* vk)
         sbo_info_material.range = m_materials_padded_size;
         if (bind_mesh_textures)
         {
-            data_set.resize(4, {});
-            data_set[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            data_set[3].dstSet = m_data_descriptor_sets[i];
-            data_set[3].dstBinding = 3;
-            data_set[3].dstArrayElement = 0;
-            data_set[3].descriptorType =
-                VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-            data_set[3].descriptorCount = 1;
-            data_set[3].pBufferInfo = &sbo_info_material;
+            data_set.push_back({});
+            VkWriteDescriptorSet& ds = data_set.back();
+            ds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            ds.dstSet = m_data_descriptor_sets[i];
+            ds.dstBinding = 4;
+            ds.dstArrayElement = 0;
+            ds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+            ds.descriptorCount = 1;
+            ds.pBufferInfo = &sbo_info_material;
         }
 
         vkUpdateDescriptorSets(vk->getDevice(), data_set.size(),
@@ -1977,7 +2034,7 @@ void GEVulkanDrawCall::addSkyBox(scene::ISceneNode* node)
 void GEVulkanDrawCall::drawSkyBox(VkCommandBuffer cmd, int current_buffer_idx,
                                   std::vector<uint32_t>& dynamic_offsets)
 {
-    if (!m_skybox_renderer)
+    if (!m_skybox_renderer || !m_skybox_renderer->getDescriptorSet())
         return;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         *m_graphics_pipelines["skybox"].m_pipeline.get());
@@ -2051,5 +2108,85 @@ bool GEVulkanDrawCall::doDepthOnlyRenderingFirst()
     }
     return status == ENABLED;
 }   // doDepthOnlyRenderingFirst
+
+// ----------------------------------------------------------------------------
+VertexDescription GEVulkanDrawCall::getDefaultVertexDescription() const
+{
+    VertexDescription vertex_description;
+    auto& binding_descriptions = vertex_description.first;
+    binding_descriptions.resize(2);
+    size_t bone_pitch = sizeof(int16_t) * 8;
+    size_t static_pitch = sizeof(irr::video::S3DVertexSkinnedMesh) - bone_pitch;
+    binding_descriptions[0].binding = 0;
+    binding_descriptions[0].stride = static_pitch;
+    binding_descriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    binding_descriptions[1].binding = 1;
+    binding_descriptions[1].stride = bone_pitch;
+    binding_descriptions[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    auto& attribute_descriptions = vertex_description.second;
+    attribute_descriptions.resize(8);
+    attribute_descriptions[0].binding = 0;
+    attribute_descriptions[0].location = 0;
+    attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attribute_descriptions[0].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_position);
+    attribute_descriptions[1].binding = 0;
+    attribute_descriptions[1].location = 1;
+    attribute_descriptions[1].format = VK_FORMAT_A2B10G10R10_SNORM_PACK32;
+    attribute_descriptions[1].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_normal);
+    attribute_descriptions[2].binding = 0;
+    attribute_descriptions[2].location = 2;
+    attribute_descriptions[2].format = VK_FORMAT_A8B8G8R8_UNORM_PACK32;
+    attribute_descriptions[2].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_color);
+    attribute_descriptions[3].binding = 0;
+    attribute_descriptions[3].location = 3;
+    attribute_descriptions[3].format = VK_FORMAT_R16G16_SFLOAT;
+    attribute_descriptions[3].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_all_uvs);
+    attribute_descriptions[4].binding = 0;
+    attribute_descriptions[4].location = 4;
+    attribute_descriptions[4].format = VK_FORMAT_R16G16_SFLOAT;
+    attribute_descriptions[4].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_all_uvs) + (sizeof(int16_t) * 2);
+    attribute_descriptions[5].binding = 0;
+    attribute_descriptions[5].location = 5;
+    attribute_descriptions[5].format = VK_FORMAT_A2B10G10R10_SNORM_PACK32;
+    attribute_descriptions[5].offset = offsetof(irr::video::S3DVertexSkinnedMesh, m_tangent);
+    attribute_descriptions[6].binding = 1;
+    attribute_descriptions[6].location = 6;
+    attribute_descriptions[6].format = VK_FORMAT_R16G16B16A16_SINT;
+    attribute_descriptions[6].offset = 0;
+    attribute_descriptions[7].binding = 1;
+    attribute_descriptions[7].location = 7;
+    attribute_descriptions[7].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    attribute_descriptions[7].offset = sizeof(int16_t) * 4;
+
+    return vertex_description;
+}   // getDefaultVertexDescription
+
+// ----------------------------------------------------------------------------
+void GEVulkanDrawCall::addLightNode(irr::scene::ILightSceneNode* node)
+{
+    if (!m_light_handler)
+        return;
+    if (node->getLightType() == irr::video::ELT_DIRECTIONAL)
+    {
+        // Sun node
+        m_light_handler->addLightNode(node);
+    }
+    else
+    {
+        const video::SLight& l = node->getLightData();
+        if (m_culling_tool->isCulled(l.Position, l.Radius))
+            return;
+        m_light_handler->addLightNode(node);
+    }
+}   // addLightNode
+
+// ----------------------------------------------------------------------------
+size_t GEVulkanDrawCall::getLightDataOffset() const
+{
+    size_t ubo_size = sizeof(GEVulkanCameraUBO);
+    return ubo_size +
+        getPadding(ubo_size, m_limits.minUniformBufferOffsetAlignment);
+}   // getLightDataOffset
 
 }

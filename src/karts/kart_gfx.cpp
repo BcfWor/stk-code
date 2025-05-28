@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include "IVideoDriver.h"
 
 
 #define KART_GFX_SS_NITRO_LIGHT_MAX     1
@@ -67,7 +68,7 @@ KartGFX::KartGFX(const AbstractKart *kart, bool is_day)
     // Create nitro light
     core::vector3df location(0.0f, 0.5f, -0.5f*length - 0.05f);
 #ifndef SERVER_ONLY
-    if (!GUIEngine::isNoGraphics() && CVS->isGLSL())
+    if (!GUIEngine::isNoGraphics() && supportsLight())
     {
         m_nitro_light = irr_driver->addLight(location, /*force*/ 0.4f,
                                              /*radius*/ 5.0f, 0.0f, 0.4f, 1.0f,
@@ -165,7 +166,7 @@ KartGFX::~KartGFX()
             delete m_all_emitters[i];
     }   // for i < KGFX_COUNT
 
-    if (!GUIEngine::isNoGraphics() && CVS->isGLSL())
+    if (!GUIEngine::isNoGraphics() && supportsLight())
     {
         m_nitro_light->drop();
         m_skidding_light_1->drop();
@@ -532,7 +533,7 @@ void KartGFX::updateNitroGraphics(float nitro_frac)
         setCreationRateRelative(KartGFX::KGFX_NITROSMOKE1, nitro_frac);
         setCreationRateRelative(KartGFX::KGFX_NITROSMOKE2, nitro_frac);
         
-        if (CVS->isGLSL())
+        if (supportsLight())
             m_nitro_light->setVisible(true);
     }
     else
@@ -542,7 +543,7 @@ void KartGFX::updateNitroGraphics(float nitro_frac)
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE1, 0);
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE2, 0);
         
-        if (CVS->isGLSL())
+        if (supportsLight())
             m_nitro_light->setVisible(false);
     }
     
@@ -571,7 +572,7 @@ void KartGFX::updateNitroGraphics(float nitro_frac)
 void KartGFX::updateSkidLight(unsigned int level)
 {
 #ifndef SERVER_ONLY
-    if (!GUIEngine::isNoGraphics() && CVS->isGLSL())
+    if (!GUIEngine::isNoGraphics() && supportsLight())
     {
         m_skidding_light_1->setVisible(level == 1);
         m_skidding_light_2->setVisible(level > 1);
@@ -637,7 +638,7 @@ void KartGFX::setGFXFromReplay(int nitro, bool zipper,
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE1, (float)nitro);
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE2, (float)nitro);
         
-        if (CVS->isGLSL())
+        if (supportsLight())
             m_nitro_light->setVisible(true);
     }
     else
@@ -647,7 +648,7 @@ void KartGFX::setGFXFromReplay(int nitro, bool zipper,
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE1, 0.0f);
         setCreationRateAbsolute(KartGFX::KGFX_NITROSMOKE2, 0.0f);
         
-        if (CVS->isGLSL())
+        if (supportsLight())
             m_nitro_light->setVisible(false);
     }
 
@@ -664,7 +665,7 @@ void KartGFX::setGFXFromReplay(int nitro, bool zipper,
         if (m_all_emitters[KGFX_SKID1R])
             m_all_emitters[KGFX_SKID1R]->setParticleType(skid_kind);
 
-        if (CVS->isGLSL())
+        if (supportsLight())
         {
             m_skidding_light_1->setVisible(!red_skidding);
             m_skidding_light_2->setVisible(red_skidding);
@@ -678,7 +679,7 @@ void KartGFX::setGFXFromReplay(int nitro, bool zipper,
         setCreationRateAbsolute(KartGFX::KGFX_SKIDL, 0.0f);
         setCreationRateAbsolute(KartGFX::KGFX_SKIDR, 0.0f);
         
-        if (CVS->isGLSL())
+        if (supportsLight())
         {
             m_skidding_light_1->setVisible(false);
             m_skidding_light_2->setVisible(false);
@@ -691,7 +692,7 @@ void KartGFX::setGFXFromReplay(int nitro, bool zipper,
 void KartGFX::setGFXInvisible()
 {
 #ifndef SERVER_ONLY
-    if (!GUIEngine::isNoGraphics() && CVS->isGLSL())
+    if (!GUIEngine::isNoGraphics() && supportsLight())
     {
         m_nitro_light->setVisible(false);
         m_skidding_light_1->setVisible(false);
@@ -700,3 +701,14 @@ void KartGFX::setGFXInvisible()
     }
 #endif
 }   // setGFXInvisible
+
+// ----------------------------------------------------------------------------
+bool KartGFX::supportsLight() const
+{
+#ifdef SERVER_ONLY
+    return false;
+#else
+    return CVS->isGLSL() ||
+        irr_driver->getVideoDriver()->getDriverType() == video::EDT_VULKAN;
+#endif
+}

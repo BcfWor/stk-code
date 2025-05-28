@@ -25,7 +25,7 @@ namespace irr
     namespace scene
     {
         class ISceneNode; class IBillboardSceneNode; struct SParticle;
-        class IMesh;
+        class IMesh; class ILightSceneNode;
     }
 }
 
@@ -38,8 +38,12 @@ class GEVulkanCameraSceneNode;
 class GEVulkanDriver;
 class GEVulkanDynamicBuffer;
 class GEVulkanDynamicSPMBuffer;
+class GEVulkanLightHandler;
 class GEVulkanSkyBoxRenderer;
 class GEVulkanTextureDescriptor;
+
+typedef std::pair<std::vector<VkVertexInputBindingDescription>,
+    std::vector<VkVertexInputAttributeDescription> > VertexDescription;
 
 struct ObjectData
 {
@@ -82,7 +86,9 @@ struct PipelineSettings
     bool m_depth_write;
     char m_drawing_priority;
     std::function<void(uint32_t*, void**)> m_push_constants_func;
-    VkPipelineLayout m_fs_quad_pl;
+    VkPipelineLayout m_custom_pl;
+    VkCompareOp m_depth_op;
+    VertexDescription m_vertex_description;
 
     bool isTransparent() const { return m_alphablend || m_additive; }
 };
@@ -132,6 +138,8 @@ private:
         m_dynamic_spm_buffers;
 
     GECullingTool* m_culling_tool;
+
+    GEVulkanLightHandler* m_light_handler;
 
     std::vector<DrawCallData> m_cmds;
 
@@ -273,6 +281,10 @@ private:
     }
     // ------------------------------------------------------------------------
     bool doDepthOnlyRenderingFirst();
+    // ------------------------------------------------------------------------
+    VertexDescription getDefaultVertexDescription() const;
+    // ------------------------------------------------------------------------
+    size_t getLightDataOffset() const;
 public:
     // ------------------------------------------------------------------------
     GEVulkanDrawCall();
@@ -316,6 +328,8 @@ public:
     }
     // ------------------------------------------------------------------------
     void addSkyBox(irr::scene::ISceneNode* node);
+    // ------------------------------------------------------------------------
+    void addLightNode(irr::scene::ILightSceneNode* node);
 };   // GEVulkanDrawCall
 
 }

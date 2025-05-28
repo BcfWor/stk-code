@@ -198,7 +198,7 @@ namespace GE
         //! Sets the dynamic ambient light color. The default color is
         //! (0,0,0,0) which means it is dark.
         //! \param color: New color of the ambient light.
-        virtual void setAmbientLight(const SColorf& color) {}
+        virtual void setAmbientLight(const SColorf& color) { CNullDriver::setAmbientLight(color); }
 
         //! Draws a shadow volume into the stencil buffer.
         virtual void drawStencilShadowVolume(const core::array<core::vector3df>& triangles, bool zfail=true, u32 debugDataVisible=0) {}
@@ -342,7 +342,9 @@ namespace GE
             destroySwapChainRelated(false/*handle_surface*/);
             createSwapChainRelated(false/*handle_surface*/);
         }
-        void updateDriver(bool pbr_changed = false);
+        void updateDriver(bool scale_changed = true, bool pbr_changed = false,
+                          bool ibl_changed = false);
+        void reloadShaders();
         uint32_t getGraphicsFamily() const         { return m_graphics_family; }
         unsigned getGraphicsQueueCount() const
                                               { return m_graphics_queue_count; }

@@ -365,12 +365,6 @@ void KartSelectionScreen::beforeAddingWidget()
         kart_class->addLabel(_(class_str.c_str()));
     }
     kart_class->addLabel(_("All"));
-
-    DynamicRibbonWidget* w = getWidget<DynamicRibbonWidget>("karts");
-    assert( w != NULL );
-
-    // Avoid too many items shown at the same time
-    w->setItemCountHint(std::min((int)kart_properties_manager->getNumberOfKarts(), 20));
 }   // beforeAddingWidget
 
 // ----------------------------------------------------------------------------
@@ -1168,19 +1162,27 @@ void KartSelectionScreen::eventCallback(Widget* widget,
             player_id == PLAYER_ID_GAME_MASTER && !m_game_master_confirmed &&
             selection != RANDOM_KART_ID && !selection.empty())
         {
-            const KartProperties *kp = kart_properties_manager->getKart(selection);
-
-            if (PlayerManager::getCurrentPlayer()->isFavoriteKart(kp->getIdent()))
+            // Locked karts can't be set as favorites
+            if (StringUtils::startsWith(selection, ID_LOCKED))
             {
-                PlayerManager::getCurrentPlayer()->removeFavoriteKart(kp->getIdent());
+                unlock_manager->playLockSound();
             }
             else
             {
-                PlayerManager::getCurrentPlayer()->addFavoriteKart(kp->getIdent());
-            }
-            setKartsFromCurrentGroup();
+                const KartProperties *kp = kart_properties_manager->getKart(selection);
 
-            handleKartListFocus();
+                if (PlayerManager::getCurrentPlayer()->isFavoriteKart(kp->getIdent()))
+                {
+                    PlayerManager::getCurrentPlayer()->removeFavoriteKart(kp->getIdent());
+                }
+                else
+                {
+                    PlayerManager::getCurrentPlayer()->addFavoriteKart(kp->getIdent());
+                }
+                setKartsFromCurrentGroup();
+
+                handleKartListFocus();
+            }
         }
         else if (m_kart_widgets.size() > unsigned(player_id) && !useContinueButton())
             playerConfirm(player_id);
@@ -1256,7 +1258,7 @@ void KartSelectionScreen::onFocusChanged(GUIEngine::Widget* previous,
 
     if (GUIEngine::isFocusedForPlayer(kart_class, playerID))
     {
-        for (int i = 0; i < m_kart_widgets.size(); i++)
+        for (unsigned int i = 0; i < m_kart_widgets.size(); i++)
         {
             if (m_kart_widgets[i].getPlayerID() == playerID)
             {
