@@ -227,6 +227,12 @@ namespace ServerConfig
     
     SERVER_CFG_PREFIX StringServerConfigParam m_live_soccer_log_path
         SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_match.log", "live-soccer-log-path", "File path to the live soccer log."));
+    
+    SERVER_CFG_PREFIX StringServerConfigParam m_server_livesoccer_port
+	SERVER_CFG_DEFAULT(StringServerConfigParam("9877", "server-livesoccer-port", "Port for live soccer socket"));
+
+    SERVER_CFG_PREFIX StringServerConfigParam m_server_livesoccer_ip
+	SERVER_CFG_DEFAULT(StringServerConfigParam("127.0.0.1", "server-livesoccer-ip", "IP for live soccer socket"));
 
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_ranking_path
 	SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_ranking.txt", "soccer-ranking-path", "File path to the soccer ranking file."));
