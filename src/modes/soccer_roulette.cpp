@@ -58,15 +58,12 @@ SoccerRoulette* SoccerRoulette::get()
 SoccerRoulette::SoccerRoulette()
 {
     m_current_field_index = 0;
-    m_minimap_running = false;
-    m_minimap_socket = -1;
     loadFieldsFromConfig();
     loadTeamsFromXML();
 }
 // -----------------------------------------------------------------------------
 SoccerRoulette::~SoccerRoulette()
 {
-    stopMinimapExport();
 }
 // -----------------------------------------------------------------------------
 bool SoccerRoulette::isEnabled() const

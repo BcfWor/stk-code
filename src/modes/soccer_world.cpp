@@ -53,6 +53,7 @@
 #include <numeric>
 #include <string>
 #include "utils/string_utils.hpp"
+#include "network/live_soccer.hpp"
 
 //=============================================================================
 class BallGoalData
@@ -443,6 +444,8 @@ void SoccerWorld::onGo()
     log_file << "\n\n";
     log_file.close();
     }
+    LiveSoccer::getInstance()->startExport();
+    LiveSoccer::getInstance()->resetGame();
 }   // onGo
 
 //-----------------------------------------------------------------------------
@@ -758,6 +761,14 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 	   	    log_file << match_time << "s: " << player_name_log << " (" << team_name
 			    << ") scored a goal\n";
 	   	    log_file.close();
+		    if (LiveSoccer::getInstance()->isActive())
+		    {
+			    int team_number = (team_name == "red") ? KART_TEAM_RED : KART_TEAM_BLUE;
+			    LiveSoccer::getInstance()->updateGoal(player_name_log, team_number,
+					    			getScore(KART_TEAM_RED),
+								getScore(KART_TEAM_BLUE),
+								match_time);
+		    }
 	   }
 	}
 	else
