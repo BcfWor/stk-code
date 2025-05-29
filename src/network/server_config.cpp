@@ -432,8 +432,6 @@ void loadServerLobbyFromConfig()
     if (modes.second == RaceManager::MAJOR_MODE_GRAND_PRIX)
         m_server_configurable = false;
 
-    const bool is_soccer =
-        RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER;
     const bool is_gp =
         RaceManager::get()->getMajorMode() == RaceManager::MAJOR_MODE_GRAND_PRIX;
     const bool is_battle = RaceManager::get()->isBattleMode();
@@ -441,12 +439,9 @@ void loadServerLobbyFromConfig()
     std::shared_ptr<LobbyProtocol> server_lobby;
     server_lobby = STKHost::create();
 
-    if (is_soccer)
-    {
-        server_lobby->getGameSetup()
-            ->setSoccerGoalTarget(m_soccer_goal_target);
-    }
-    else if (is_gp)
+    server_lobby->getGameSetup()
+        ->setSoccerGoalTarget(m_soccer_goal_target);
+    if (is_gp)
     {
         server_lobby->getGameSetup()->setGrandPrixTrack(m_gp_track_count);
     }

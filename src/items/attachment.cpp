@@ -569,6 +569,8 @@ void Attachment::update(int ticks)
 // ----------------------------------------------------------------------------
 void Attachment::updateGraphics(float dt)
 {
+    if (!m_node)
+        return;
     // Add the suitable graphical effects if different attachment is set
     if (m_type != m_graphical_type)
     {
