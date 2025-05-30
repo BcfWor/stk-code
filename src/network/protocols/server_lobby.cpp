@@ -3345,14 +3345,7 @@ void ServerLobby::clientDisconnected(Event* event)
 
         if (m_replay_requested && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
 	{
-
 		m_replay_requested = false;
-	}
-	if (ServerConfig::m_soccer_log || (ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER))
-	{
-            std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-            log_file << "Everyone left, game ended";
-            log_file.close();
 	}
 	if (m_random_karts_enabled)
 	{
