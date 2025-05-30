@@ -224,10 +224,7 @@ namespace ServerConfig
 
     SERVER_CFG_PREFIX StringServerConfigParam m_soccer_log_path
         SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_log.txt", "soccer-log-path", "Directory where the soccer log should be written to with / at the end."));
-    
-    SERVER_CFG_PREFIX StringServerConfigParam m_live_soccer_log_path
-        SERVER_CFG_DEFAULT(StringServerConfigParam("soccer_match.log", "live-soccer-log-path", "File path to the live soccer log."));
-    
+ 
     SERVER_CFG_PREFIX StringServerConfigParam m_server_livesoccer_port
 	SERVER_CFG_DEFAULT(StringServerConfigParam("9877", "server-livesoccer-port", "Port for live soccer socket"));
 
