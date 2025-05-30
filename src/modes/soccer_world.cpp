@@ -410,42 +410,11 @@ void SoccerWorld::onGo()
     m_ball->setEnabled(true);
     m_ball->reset();
     WorldWithRank::onGo();
-    // live soccer
-    if (ServerConfig::m_soccer_log && !ServerConfig::m_soccer_roulette)
+    if (ServerConfig::m_soccer_log)
     {
-    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::trunc);
-    time_t now = time(0);
-    char* dt = ctime(&now);
-    log_file << "New match started at: " << dt;
-    Track* current_track = Track::getCurrentTrack();
-    std::string track_name = current_track->getIdent();
-    log_file << "Track: " << track_name << "\n\n";
-    log_file << "Teams:\n";
-    log_file << "Red Team: ";
-    for(unsigned int i = 0; i < getNumKarts(); i++)
-    {
-	    AbstractKart* k = getKart(i);
-	    if(getKartTeam(k->getWorldKartId()) == KART_TEAM_RED)
-		{
-			std::string player_name = StringUtils::wideToUtf8(k->getController()->getName());
-			log_file << player_name << " ";
-		}
+	    LiveSoccer::getInstance()->startExport();
+            LiveSoccer::getInstance()->resetGame();
     }
-    log_file << "\nBlue Team: ";
-    for(unsigned int i = 0; i < getNumKarts(); i++)
-    {
-	    AbstractKart* k = getKart(i);
-	    if(getKartTeam(k->getWorldKartId()) == KART_TEAM_BLUE)
-	    {
-		    std::string player_name = StringUtils::wideToUtf8(k->getController()->getName());
-		    log_file << player_name << " ";
-	    }
-    }
-    log_file << "\n\n";
-    log_file.close();
-    }
-    LiveSoccer::getInstance()->startExport();
-    LiveSoccer::getInstance()->resetGame();
 }   // onGo
 
 //-----------------------------------------------------------------------------
@@ -460,12 +429,6 @@ void SoccerWorld::terminateRace()
     }   // i<kart_amount
     tellCountIfDiffers();
     WorldWithRank::terminateRace();
-    if (ServerConfig::m_soccer_log && !ServerConfig::m_soccer_roulette)
-    {
-	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
-	    log << "Game ended! Final score: Red " << m_red_scorers.size() << " - " << m_blue_scorers.size() << " Blue\n";
-     	    log.close();
-    }
 } // terminateRace
 
 //-----------------------------------------------------------------------------
@@ -756,11 +719,6 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
             if (m_soccer_log)
 	    {
 		    GlobalLog::writeLog( "goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
-	  	    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-	  	    float match_time = getTime();
-	   	    log_file << match_time << "s: " << player_name_log << " (" << team_name
-			    << ") scored a goal\n";
-	   	    log_file.close();
 		    if (LiveSoccer::getInstance()->isActive())
 		    {
 			    int team_number = (team_name == "red") ? KART_TEAM_RED : KART_TEAM_BLUE;
@@ -776,10 +734,14 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
             if (m_soccer_log)
 	    {
 		    GlobalLog::writeLog( "own_goal "+ player_name_log + " "+team_name+"\n", GlobalLogTypes::POS_LOG);
-		    std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-		    float match_time = getTime();
-	    	    log_file << match_time << "s: " << player_name_log << " (" << team_name << ") scored an own goal\n";
-	    	    log_file.close();
+		    if (LiveSoccer::getInstance()->isActive())
+		    {
+			    int team_number = (team_name == "red") ? KART_TEAM_RED : KART_TEAM_BLUE;
+			    LiveSoccer::getInstance()->updateGoal(player_name_log, team_number,
+					    			getScore(KART_TEAM_RED),
+								getScore(KART_TEAM_BLUE),
+								match_time);
+		    }
 	    }
 	}
 
