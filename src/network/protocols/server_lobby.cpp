@@ -3205,12 +3205,8 @@ void ServerLobby::clientDisconnected(Event* event)
         RaceManager::get()->setNitrolessMode(false);
 
         if (m_replay_requested && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
-            m_replay_requested = false;
-        if (ServerConfig::m_soccer_log || (ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER))
         {
-            std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
-            log_file << "Everyone left, game ended";
-            log_file.close();
+            m_replay_requested = false;
         }
         if (m_random_karts_enabled)
         {
@@ -4692,12 +4688,6 @@ void ServerLobby::configPeersStartTime()
     if (ServerConfig::m_soccer_roulette)
     {
 	    SoccerRoulette::get()->giveNitroToAll();
-            SoccerRoulette::get()->startMinimapExport(
-			    SoccerRoulette::m_default_minimap_server,
-                            SoccerRoulette::m_default_minimap_port);
-            Log::info("ServerLobby", "Started soccer minimap export to %s:%d",
-                            SoccerRoulette::m_default_minimap_server.c_str(),
-                            SoccerRoulette::m_default_minimap_port);
     }
            	    
     joinStartGameThread();

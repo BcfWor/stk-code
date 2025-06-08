@@ -58,15 +58,12 @@ SoccerRoulette* SoccerRoulette::get()
 SoccerRoulette::SoccerRoulette()
 {
     m_current_field_index = 0;
-    m_minimap_running = false;
-    m_minimap_socket = -1;
     loadFieldsFromConfig();
     loadTeamsFromXML();
 }
 // -----------------------------------------------------------------------------
 SoccerRoulette::~SoccerRoulette()
 {
-    stopMinimapExport();
 }
 // -----------------------------------------------------------------------------
 bool SoccerRoulette::isEnabled() const
@@ -397,133 +394,6 @@ bool SoccerRoulette::checkRequiredAddons(STKPeer* peer, std::string& error_msg)
     }
     
     return true;
-}
-
-// -----------------------------------------------------------------------------
-// Minimap functions
-std::string SoccerRoulette::m_default_minimap_server = "127.0.0.1";
-int SoccerRoulette::m_default_minimap_port = 9876;
-bool SoccerRoulette::m_enable_minimap_export = true;
-
-void SoccerRoulette::startMinimapExport(const std::string& server_ip, int server_port, int update_interval_ms)
-{
-    stopMinimapExport();
-    m_minimap_server_ip = server_ip;
-    m_minimap_server_port = server_port;
-    m_minimap_update_interval_ms = update_interval_ms;
-    m_minimap_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (m_minimap_socket < 0)
-    {
-        Log::error("SoccerRoulette", "Failed to create minimap socket");
-        return;
-    }
-    m_minimap_running = true;
-    m_minimap_thread = std::thread(&SoccerRoulette::minimapExportThread, this);
-    Log::info("SoccerRoulette", "Started minimap export to %s:%d (interval: %dms)",
-             m_minimap_server_ip.c_str(), m_minimap_server_port, m_minimap_update_interval_ms);
-}
-
-// -----------------------------------------------------------------------------
-void SoccerRoulette::stopMinimapExport()
-{
-    if (m_minimap_running)
-    {
-        m_minimap_running = false;
-        if (m_minimap_thread.joinable())
-            m_minimap_thread.join();
-        
-        if (m_minimap_socket >= 0)
-        {
-            close(m_minimap_socket);
-            m_minimap_socket = -1;
-        }
-        
-        Log::info("SoccerRoulette", "Stopped minimap export");
-    }
-}
-
-// -----------------------------------------------------------------------------
-void SoccerRoulette::minimapExportThread()
-{
-    while (m_minimap_running)
-    {
-        exportMinimapData();
-        std::this_thread::sleep_for(std::chrono::milliseconds(m_minimap_update_interval_ms));
-    }
-}
-// ----------------------------------------------------------------------------
-// This function exports data to the udp server
-void SoccerRoulette::exportMinimapData()
-{
-    if (!World::getWorld())
-        return;
-    try
-    {
-        std::stringstream json;
-        json << "{";
-        json << "\"timestamp\":" << StkTime::getTimeSinceEpoch() << ",";
-        SoccerWorld* soccer_world = dynamic_cast<SoccerWorld*>(World::getWorld());
-        if (soccer_world)
-        {
-            const Vec3& ball_pos = soccer_world->getBallPosition();
-            json << "\"ball\":{\"x\":" << ball_pos.getX()
-                  << ",\"y\":" << ball_pos.getY()
-                  << ",\"z\":" << ball_pos.getZ() << "},";
-            json << "\"score\":{\"red\":" << soccer_world->getScore(KART_TEAM_RED)
-                 << ",\"blue\":" << soccer_world->getScore(KART_TEAM_BLUE) << "},";
-        }
-        json << "\"karts\":[";
-        bool first_kart = true;
-        for (unsigned int i = 0; i < World::getWorld()->getNumKarts(); i++)
-        {
-            AbstractKart* kart = World::getWorld()->getKart(i);
-            if (!kart)
-            {
-                continue;
-            }
-            if (kart->isEliminated())
-            {
-                continue;
-            }
-            if (!first_kart)
-                json << ",";
-            first_kart = false;
-            const Vec3& pos = kart->getXYZ();
-            int team = 0;
-            if (soccer_world)
-            {
-                team = (int)soccer_world->getKartTeam(kart->getWorldKartId());
-            }
-            std::string player_name = StringUtils::wideToUtf8(kart->getController()->getName());
-
-            std::string escaped_name = "";
-            for (char c : player_name) {
-                if (c == '\\' || c == '"') {
-                    escaped_name += '\\';
-                }
-                escaped_name += c;
-            }
-            json << "{\"id\":\"" << escaped_name
-                 << "\",\"name\":\"" << escaped_name
-                 << "\",\"team\":" << team
-                 << ",\"x\":" << pos.getX()
-                 << ",\"y\":" << pos.getY()
-                 << ",\"z\":" << pos.getZ() << "}";
-        }
-        json << "]}";
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(m_minimap_server_port);
-        inet_pton(AF_INET, m_minimap_server_ip.c_str(), &server_addr.sin_addr);
-        std::string json_str = json.str();
-        sendto(m_minimap_socket, json_str.c_str(), json_str.length(), 0,
-               (struct sockaddr*)&server_addr, sizeof(server_addr));
-    }
-    catch (const std::exception& e)
-    {
-        Log::error("SoccerRoulette", "Error exporting minimap data: %s", e.what());
-    }
 }
 
 // ---------------------------------------------------------------------------------
