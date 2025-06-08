@@ -22,16 +22,42 @@
 #include <cstdint>
 #include <string>
 
+enum RPSChoice : uint8_t
+{
+    RPS_NONE = 0,
+    RPS_ROCK = 1,
+    RPS_PAPER = 2,
+    RPS_SCISSORS = 3
+};
+
 struct RPSChallenge
 {
     uint32_t challenger_id;
     uint32_t challenged_id;
     std::string challenger_name;
     std::string challenged_name;
-    std::string challenger_choice;
-    std::string challenged_choice;
+    RPSChoice challenger_choice = RPS_NONE;
+    RPSChoice challenged_choice = RPS_NONE;
     uint64_t timeout;
     bool accepted;
+};
+
+// TODO
+class RockPaperScissors
+{
+    static RockPaperScissors* g_instance;
+
+
+public:
+    void create();
+    void destroy();
+
+    RockPaperScissors* get() const { return g_instance; }
+
+    static RPSChoice rpsFromString(const std::string& arg);
+    static const std::string& rpsToString(RPSChoice arg);
+    static RPSChoice winsThis(RPSChoice choice);
+    static bool wins(RPSChoice choice, RPSChoice winner);
 };
 
 #endif // LOBBY_RPS_CHALLENGE_HPP

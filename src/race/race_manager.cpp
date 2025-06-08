@@ -18,6 +18,7 @@
 
 #include "race/race_manager.hpp"
 
+#include <csignal>
 #include <iostream>
 #include <algorithm>
 #include <limits>

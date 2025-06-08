@@ -19,6 +19,7 @@
 // File moved from database_connector.cpp
 
 #include "network/moderation_toolkit/server_permission_level.hpp"
+#include <sstream>
 #ifdef ENABLE_SQLITE3
 
 #include "network/database/sqlite_database.hpp"
@@ -972,19 +973,20 @@ void SQLiteDatabase::onPlayerJoinQueries(std::shared_ptr<STKPeer> peer,
 }   // onPlayerJoinQueries
 
 //-----------------------------------------------------------------------------
-/** Prints all rows of the IPv4 ban table. Called from the network console. */
-void SQLiteDatabase::listBanTable()
+/** Prints all rows of the IPv4 ban table. */
+void SQLiteDatabase::listBanTable(std::stringstream& out)
 {
     if (!m_db)
         return;
     auto printer = [](void* data, int argc, char** argv, char** name)
     {
+        std::stringstream& out = *reinterpret_cast<std::stringstream*>(data);
         for (int i = 0; i < argc; i++)
         {
-            std::cout << name[i] << " = " << (argv[i] ? argv[i] : "NULL")
+            out << name[i] << " = " << (argv[i] ? argv[i] : "NULL")
                 << "\n";
         }
-        std::cout << "\n";
+        out << "\n";
         return 0;
     };
     if (m_ip_ban_table_exists)
@@ -993,7 +995,7 @@ void SQLiteDatabase::listBanTable()
         query += ServerConfig::m_ip_ban_table;
         query += ";";
         std::cout << "IP ban list:\n";
-        sqlite3_exec(m_db, query.c_str(), printer, NULL, NULL);
+        sqlite3_exec(m_db, query.c_str(), printer, &out, NULL);
     }
     if (m_online_id_ban_table_exists)
     {
@@ -1001,7 +1003,7 @@ void SQLiteDatabase::listBanTable()
         query += ServerConfig::m_online_id_ban_table;
         query += ";";
         std::cout << "Online Id ban list:\n";
-        sqlite3_exec(m_db, query.c_str(), printer, NULL, NULL);
+        sqlite3_exec(m_db, query.c_str(), printer, &out, NULL);
     }
 }   // listBanTable
 

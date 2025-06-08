@@ -189,6 +189,7 @@ extern "C" {
 
 #include <stdexcept>
 #include <cstdio>
+#include <csignal>
 #include <string>
 #include <cstring>
 #include <sstream>
@@ -242,6 +243,7 @@ extern "C" {
 #include "karts/kart_properties.hpp"
 #include "karts/kart_properties_manager.hpp"
 #include "karts/official_karts.hpp"
+#include "lobby/server_lobby_commands.hpp"
 #include "modes/cutscene_world.hpp"
 #include "modes/demo_world.hpp"
 #include "network/protocols/connect_to_server.hpp"
@@ -2532,6 +2534,7 @@ int main(int argc, char *argv[])
 
         if (STKHost::existHost())
         {
+            ServerLobbyCommands::create();
             if (!GUIEngine::isNoGraphics())
                 NetworkingLobby::getInstance()->push();
         }
@@ -2663,7 +2666,11 @@ int main(int argc, char *argv[])
     }
 
     if (STKHost::existHost())
+    {
         STKHost::get()->shutdown();
+    }
+    if (ServerLobbyCommands::get())
+        ServerLobbyCommands::destroy();
     ClientLobby::destroyBackgroundDownload();
 
     cleanSuperTuxKart();

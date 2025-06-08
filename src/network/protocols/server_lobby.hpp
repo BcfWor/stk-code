@@ -63,6 +63,26 @@ namespace Online
 
 class ServerLobby : public LobbyProtocol
 {
+    friend class ServerLobbyCommands;
+    friend class STKCommandContext;
+    // friend commands
+    friend class SpectateCommand;
+    friend class TeamChatCommand;
+    friend class PublicCommand;
+    friend class MuteCommand;
+    friend class UnmuteCommand;
+    friend class ListmuteCommand;
+    friend class ListServerAddonCommand;
+    friend class ServerHasAddonCommand;
+    friend class ScanServersCommand; // asynchronous chat command
+    friend class KartsCommand;
+    friend class TracksCommand;
+    friend class ReplayCommand;
+    // To be separated into their own units
+    friend class AutoteamsCommand;
+    friend class AutoteamsVariantVoteCommand;
+    friend class RPSCommand;
+    friend class JumblewordCommand;
 public:	
     typedef std::map<STKPeer*,
                       std::weak_ptr<NetworkPlayerProfile>>
@@ -99,47 +119,6 @@ public:
     };
 
 private:
-    std::vector<std::string> m_jumble_word_list;
-    std::map<uint32_t, std::string> m_jumble_player_words;
-    std::map<uint32_t, std::string> m_jumble_player_jumbled;
-    std::map<uint32_t, uint64_t> m_jumble_player_start_time;
-    uint64_t m_jumble_last_event_time;
-    std::mt19937 m_jumble_rng;
-    std::mutex m_jumble_mutex;
-    void loadJumbleWordList();
-    std::string jumbleWord(const std::string& word);
-    void startJumbleForPlayer(uint32_t player_id);
-    void endJumbleForPlayer(uint32_t player_id, bool won);
-    void updateJumbleTimer();
-    void handleJumbleCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
-    std::vector<RPSChallenge> m_rps_challenges;
-    void handleRPSCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args);
-    void checkRPSTimeouts();
-    void determineRPSWinner(RPSChallenge& challenge);
-    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_a;
-    std::pair<std::vector<std::string>, std::vector<std::string>> m_team_option_b;
-    int m_min_player_idx;
-    std::vector<std::pair<std::string, int>> m_player_vec;
-    int m_team_selection_votes_a;
-    int m_team_selection_votes_b;
-    std::set<uint32_t> m_team_selection_voted_peers;
-    bool m_team_selection_vote_active;
-    uint64_t m_team_selection_vote_timer;
-    void startTeamSelectionVote();
-    void handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote);
-    void applyTeamSelection(bool select_option_a);
-    void checkTeamSelectionVoteTimeout();
-    std::pair<std::vector<std::string>, std::vector<std::string>> createAlternativeTeams(
-        const std::vector<std::pair<std::string, int>>& players); 
-    bool checkXmlEmoji(const std::string& username) const;
-    bool checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer);
-    bool m_random_karts_enabled;
-    void assignRandomKarts();
-    void resetKartSelections();
-    std::string m_replay_dir;
-    bool m_replay_requested = false;    
-    std::string getTimeStamp();    
-    std::string execPythonScript();    
     struct KeyData
     {
         std::string m_aes_key;
@@ -149,7 +128,30 @@ private:
         bool m_tried = false;
     };
 
-    // Add more macro conditions when needed. SQLite3 is the only implementation for now.
+    std::vector<std::string> m_jumble_word_list;
+    std::map<uint32_t, std::string> m_jumble_player_words;
+    std::map<uint32_t, std::string> m_jumble_player_jumbled;
+    std::map<uint32_t, uint64_t> m_jumble_player_start_time;
+    uint64_t m_jumble_last_event_time;
+    std::mt19937 m_jumble_rng;
+    std::mutex m_jumble_mutex;
+    std::vector<RPSChallenge> m_rps_challenges;
+    std::pair<
+        std::vector<std::string>,
+        std::vector<std::string>> m_team_option_a;
+    std::pair<
+        std::vector<std::string>,
+        std::vector<std::string>> m_team_option_b;
+    int m_min_player_idx;
+    std::vector<std::pair<std::string, int>> m_player_vec;
+    int m_team_selection_votes_a;
+    int m_team_selection_votes_b;
+    std::set<uint32_t> m_team_selection_voted_peers;
+    bool m_team_selection_vote_active;
+    uint64_t m_team_selection_vote_timer;
+    bool m_random_karts_enabled;
+    std::string m_replay_dir;
+    bool m_replay_requested = false;    
 #ifdef ENABLE_SQLITE3
     AbstractDatabase* m_db;
 
@@ -270,9 +272,9 @@ private:
     unsigned m_ai_count;
 
     // TierS additional members
-    uint64_t m_last_wanrefresh_cmd_time;
     std::shared_ptr<ServerList> m_last_wanrefresh_res;
     std::weak_ptr<STKPeer> m_last_wanrefresh_requester;
+    std::atomic<bool> m_last_wanrefresh_is_peer;
     std::mutex m_wanrefresh_lock;
 
     // Pole
@@ -288,12 +290,9 @@ private:
     int         m_set_laps;
     /* for race it's reverse on/off, for battle/soccer it's random items */
     bool        m_set_specvalue;
-    std::map<std::string, std::vector<std::string>> m_command_voters;
+    //std::map<std::string, std::vector<std::string>> m_command_voters;
     std::set<STKPeer*> m_team_speakers;
-    //Deprecated
-    //std::map<STKPeer*, std::set<irr::core::stringw>> m_message_receivers;
     int m_max_players;
-    int m_max_players_in_game;
     bool m_powerupper_active = false;
     // TODO:
     enum KartRestrictionMode m_kart_restriction = NONE;
@@ -378,7 +377,7 @@ private:
         std::vector<std::shared_ptr<NetworkPlayerProfile> >& players) const;
     std::vector<std::shared_ptr<NetworkPlayerProfile> > getLivePlayers() const;
     void setPlayerKarts(const NetworkString& ns, STKPeer* peer) const;
-    bool handleAssets(const NetworkString& ns, STKPeer* peer);
+    bool handleAssets(const NetworkString& ns, std::shared_ptr<STKPeer> peer);
     /* TODO: to be integrated with nnwcli */
     void handleServerCommand(Event* event, std::shared_ptr<STKPeer> peer);
     void liveJoinRequest(Event* event);
@@ -390,7 +389,6 @@ private:
     void handleKartInfo(Event* event);
     void clientInGameWantsToBackLobby(Event* event);
     void clientSelectingAssetsWantsToBackLobby(Event* event);
-    std::set<std::shared_ptr<STKPeer>> getSpectatorsByLimit();
     void kickPlayerWithReason(STKPeer* peer, const char* reason) const;
     void testBannedForIP(STKPeer* peer) const;
     void testBannedForIPv6(STKPeer* peer) const;
@@ -409,6 +407,7 @@ public:
     virtual void asynchronousUpdate() OVERRIDE;
 
     void updatePlayerList(bool update_when_reset_server = false);
+    std::shared_ptr<STKPeer> getServerOwner() const { return m_server_owner.lock(); }
     void updateServerOwner(std::shared_ptr<STKPeer> owner = nullptr);
     void updateTracksForMode();
     /* To be adjusted and unified with the legacy signature: find usage and adjust name */
@@ -418,6 +417,7 @@ public:
     void handleServerConfiguration(Event* event);
     void updateServerConfiguration(int new_difficulty, int new_game_mode,
             std::int8_t new_soccer_goal_target);
+    // TODO: move to the source file
     void resetPeersReady()
     {
         for (auto it = m_peers_ready.begin(); it != m_peers_ready.end();)
@@ -458,7 +458,7 @@ public:
     void saveInitialItems(std::shared_ptr<NetworkItemManager> nim);
     void saveIPBanTable(const SocketAddress& addr);
     void removeIPBanTable(const SocketAddress& addr);
-    void listBanTable();
+    void listBanTable(std::stringstream& out);
     void initServerStatsTable();
     bool isAIProfile(const std::shared_ptr<NetworkPlayerProfile>& npp) const
     {
@@ -473,12 +473,17 @@ public:
                           m_tournament_fields_per_game;
     bool serverAndPeerHaveTrack(std::shared_ptr<STKPeer>& peer, std::string track_id) const;
     bool serverAndPeerHaveTrack(STKPeer* peer, std::string track_id) const;
-    bool canRace(std::shared_ptr<STKPeer>& peer) const;
-    bool canRace(STKPeer* peer) const;
+    // TODO: refactor to rename the function, and perhaps merge it
+    // ...outside of the lobby? or with another public member method?
+    bool peerHasForcedTrack(std::shared_ptr<STKPeer>& peer) const;
+    bool peerHasForcedTrack(STKPeer* peer) const;
+    bool checkAllStandardContentInstalled(STKPeer* peer) const;
     static int m_fixed_laps;
     void sendStringToPeer(const std::string& s, std::shared_ptr<STKPeer>& peer) const;
     void sendStringToPeer(const irr::core::stringw& s, std::shared_ptr<STKPeer>& peer) const;
-    void sendStringToAllPeers(std::string& s);
+    void sendStringToPeer(const std::string& s, STKPeer* peer) const;
+    void sendStringToPeer(const irr::core::stringw& s, STKPeer* peer) const;
+    void sendStringToAllPeers(const std::string s);
     void sendRandomInstalladdonLine(STKPeer* peer) const;
     void sendRandomInstalladdonLine(std::shared_ptr<STKPeer> peer) const;
     void sendCurrentModifiers(STKPeer* peer) const;
@@ -503,6 +508,9 @@ public:
         std::shared_ptr<NetworkPlayerProfile>> decidePoles();
     void announcePoleFor(std::shared_ptr<NetworkPlayerProfile>& p, KartTeam team) const;
 
+    bool getRandomKartsEnabled() const { return m_random_karts_enabled; };
+    void setRandomKartsEnabled(bool state, bool announce = true);
+
     // When the database is made into a singleton, deprecate this method.
     AbstractDatabase* getDatabase() { return m_db; };
     /* Moderation toolkit */
@@ -524,8 +532,9 @@ public:
     void sendNoPermissionToPeer(STKPeer* p, const std::vector<std::string>& argv);
     void forceChangeTeam(NetworkPlayerProfile* player, KartTeam team);
     void forceChangeHandicap(NetworkPlayerProfile* player, HandicapLevel lvl);
-    bool forceSetTrack(std::string track_id, int laps, bool specvalue = false,
+    bool setForcedTrack(std::string track_id, int laps, bool specvalue = false,
             bool is_soccer = false, bool announce = true);
+    const std::string& getForcedTrack() const { return m_set_field; };
     /* Todo: send to the underlying classes instead of keeping it here */
     /* Deprecated functions, use AbstractDatabase instance instead */
     uint32_t lookupOID(const std::string& name);
@@ -538,19 +547,40 @@ public:
     int64_t getTimeout();
     void changeTimeout(long timeout, bool infinite = false, bool absolute = false);
 
-    std::pair<unsigned int, int> getSoccerRanking(std::string username) const;
-    std::pair<unsigned int, int> getPlayerRanking(std::string username) const;
     int getMaxPlayers() const                                           { return m_max_players; }
-    int getMaxPlayersInGame() const                                     { return m_max_players_in_game; }
-    void setMaxPlayersInGame(int value, bool notify = true);
-    std::string get_elo_change_string();
+    // unimplemented
     std::string getPlayerAlt(std::string username) const;
     std::pair<std::vector<std::string>, std::vector<std::string>> createBalancedTeams(std::vector<std::pair<std::string, int>>& elo_players);
-    void soccer_ranked_make_teams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec);
+    // TODO: move to soccer_elo_ranking
+    std::pair<unsigned int, int> getSoccerRanking(std::string username) const;
+    std::pair<unsigned int, int> getPlayerRanking(std::string username) const;
+    std::string get_elo_change_string();
+    void soccerRankedMakeTeams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec);
+    // TODO: move to soccer_autoteams
+    void startTeamSelectionVote();
+    void handleTeamSelectionVote(STKPeer* peer, bool select_option_a);
+    void applyTeamSelection(bool select_option_a);
+    void checkTeamSelectionVoteTimeout();
+    std::pair<std::vector<std::string>, std::vector<std::string>> createAlternativeTeams(
+        const std::vector<std::pair<std::string, int>>& players); 
     bool isReplayRequested() const                                      { return m_replay_requested; }
     void setReplayRequested(const bool value)                           { m_replay_requested = value; }
     // Soccer Roulette
     void checkSoccerRoulette();
+
+    void loadJumbleWordList();
+    std::string jumbleWord(const std::string& word);
+    void startJumbleForPlayer(uint32_t player_id);
+    void endJumbleForPlayer(uint32_t player_id, bool won);
+    void updateJumbleTimer();
+    void checkRPSTimeouts();
+    void determineRPSWinner(RPSChallenge& challenge);
+    bool checkXmlEmoji(const std::string& username) const;
+    void assignRandomKarts();
+    void resetKartSelections();
+    std::string getTimeStamp();    
+    std::string execPythonScript();    
+    // Add more macro conditions when needed. SQLite3 is the only implementation for now.
 };   // class ServerLobby
 
 #endif // SERVER_LOBBY_HPP

@@ -23,6 +23,7 @@
 #include "states_screens/race_gui_base.hpp"
 #include "karts/abstract_kart.hpp"
 
+#include <sstream>
 #include <string>
 
 class AbstractKart;
@@ -45,7 +46,7 @@ private:
 
 public:
     static void addGoalData(const std::string& player, float speed, int team);
-    static void showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team);
+    static void showTeamGoalHistory(std::stringstream& oss, int team);
     static void clearHistory() { s_goal_history.clear(); }
     static void saveGoalHistoryToFile();
 };

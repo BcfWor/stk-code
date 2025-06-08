@@ -1,6 +1,7 @@
 #ifndef HEADER_SOCCER_ROULETTE_HPP
 #define HEADER_SOCCER_ROULETTE_HPP
 
+#include "lobby/stk_command_context.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -60,10 +61,10 @@ public:
     void resetFieldIndex();
     void calculateGameResult();
     std::string getLastGameResults();
-    void kickPlayer(const std::string& player_name, const std::shared_ptr<STKPeer>& kicker_peer);
-    void reassignTeams(const std::shared_ptr<STKPeer>& commander_peer);
+    void kickPlayer(const std::string& player_name, STKCommandContext* kicker);
+    void reassignTeams(STKCommandContext* commander);
     void loadTeamsFromXML();
-    void setRouletteTimeout(const std::shared_ptr<STKPeer>& commander_peer);
+    void setRouletteTimeout(STKCommandContext* commander);
 };
 
 #endif

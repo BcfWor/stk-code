@@ -699,7 +699,7 @@ void SoccerRoulette::calculateGameResult()
         Log::error("SoccerRoulette", "Exception while calculating game results: %s", e.what());
     }
 }
-void SoccerRoulette::kickPlayer(const std::string& player_name, const std::shared_ptr<STKPeer>& kicker_peer)
+void SoccerRoulette::kickPlayer(const std::string& player_name, STKCommandContext* const commander)
 {
     auto sl = LobbyProtocol::get<ServerLobby>();
     if (!sl)
@@ -712,24 +712,23 @@ void SoccerRoulette::kickPlayer(const std::string& player_name, const std::share
 
     if (player_name.empty() || !player_peer || player_peer->isAIPeer())
     {
-        std::string error_msg = "Player '" + player_name + "' not found. Usage: /sr kick <player name>";
-        std::shared_ptr<STKPeer> kicker_peer_copy = kicker_peer;
-        sl->sendStringToPeer(error_msg, kicker_peer_copy);
+        commander->write("Player '" + player_name + "' not found. Usage: /sr kick <player name>");
+        commander->flush();
         return;
     }
-    std::string kicker_name = StringUtils::wideToUtf8(kicker_peer->getPlayerProfiles()[0]->getName());
+    std::string kicker_name = commander->getProfileName();
     Log::info("SoccerRoulette", "Player %s kicked %s.",
               kicker_name.c_str(), player_name.c_str());
     std::string kick_msg = kicker_name + " kicked " + player_name;
     sl->sendStringToAllPeers(kick_msg);
     player_peer->kick();
-    std::string confirm_msg = "You kicked player '" + player_name + "'";
-    std::shared_ptr<STKPeer> kicker_peer_copy = kicker_peer;
-    sl->sendStringToPeer(confirm_msg, kicker_peer_copy);
+    commander->nprintf("You kicked player '%s'", 512,
+            player_name.c_str());
+    commander->flush();
 }
 // -----------------------------------------------------------------------------
 // Reassigns teams
-void SoccerRoulette::reassignTeams(const std::shared_ptr<STKPeer>& commander_peer)
+void SoccerRoulette::reassignTeams(STKCommandContext* const commander)
 {
     auto sl = LobbyProtocol::get<ServerLobby>();
     if (!sl)
@@ -771,15 +770,12 @@ void SoccerRoulette::reassignTeams(const std::shared_ptr<STKPeer>& commander_pee
         }
     }
     sl->updatePlayerList();
-    if (commander_peer)
-    {
-        std::string confirm_msg = "Reassigned teams";
+    std::string confirm_msg = "Reassigned teams";
 	sl->sendStringToAllPeers(confirm_msg);
-    }
 }
 // -----------------------------------------------------------------------------
 // Sets the game start timeout (not used for now)
-void SoccerRoulette::setRouletteTimeout(const std::shared_ptr<STKPeer>& commander_peer)
+void SoccerRoulette::setRouletteTimeout(STKCommandContext* const commander)
 {
     auto sl = LobbyProtocol::get<ServerLobby>();
     if (!sl)

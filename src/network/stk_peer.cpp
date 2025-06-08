@@ -19,12 +19,16 @@
 #include "network/stk_peer.hpp"
 #include "config/stk_config.hpp"
 #include "config/user_config.hpp"
+#include "lobby/stk_command_context.hpp"
 #include "moderation_toolkit/server_permission_level.hpp"
 #include "network/crypto.hpp"
 #include "network/event.hpp"
+#include "network/moderation_toolkit/player_restriction.hpp"
 #include "network/network.hpp"
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
+#include "network/protocols/server_lobby.hpp"
+#include "network/server_config.hpp"
 #include "network/socket_address.hpp"
 #include "network/stk_ipv6.hpp"
 #include "network/stk_host.hpp"
@@ -33,12 +37,13 @@
 #include "utils/time.hpp"
 
 
+#include <memory>
 #include <string.h>
 
 /** Constructor for an empty peer.
  */
 STKPeer::STKPeer(ENetPeer *enet_peer, STKHost* host, uint32_t host_id)
-       : m_address(enet_peer->address), m_host(host)
+       : m_address(enet_peer->address), m_host(host), m_command_context(new STKCommandContext())
 {
     m_addons_scores.fill(-1);
     m_socket_address.reset(new SocketAddress(m_address));
@@ -56,6 +61,12 @@ STKPeer::STKPeer(ENetPeer *enet_peer, STKHost* host, uint32_t host_id)
     m_last_activity.store((int64_t)StkTime::getMonoTimeMs());
     m_last_message.store(0);
     m_consecutive_messages = 0;
+
+    m_permission_level =    PERM_PLAYER;
+    m_veto =                PERM_PLAYER;
+    m_restrictions =        PRF_OK;
+    m_command_context->set_peer(this);
+    m_last_eligibility.store(PELG_YES);
 }   // STKPeer
 
 //-----------------------------------------------------------------------------
@@ -194,11 +205,64 @@ void STKPeer::setCrypto(std::unique_ptr<Crypto>&& c)
     m_crypto = std::move(c);
 }   // setCrypto
 
-int STKPeer::getPermissionLevel() const
+//-----------------------------------------------------------------------------
+PeerEligibility STKPeer::testEligibility()
 {
-    if (!hasPlayerProfiles()) 
+    std::shared_ptr<ServerLobby> const lobby =
+        LobbyProtocol::get<ServerLobby>();
+    // if a spectator then not eligible
+    if (alwaysSpectate() != ASM_NONE)
     {
-        return PERM_NONE;
+        m_last_eligibility.store(PELG_SPECTATOR);
+        return PELG_SPECTATOR;
     }
-    return m_players[0]->getPermissionLevel();
+    if (!isValidated())
+    {
+        m_last_eligibility.store(PELG_OTHER);
+        return PELG_OTHER;
+    }
+
+    // if a permission level is not enough or restricted
+    if (getPermissionLevel() < PERM_PLAYER || hasRestriction(PRF_NOGAME))
+    {
+        m_last_eligibility.store(PELG_ACCESS_DENIED);
+        return PELG_ACCESS_DENIED;
+    }
+
+    if (!lobby)
+    {
+        m_last_eligibility.store(PELG_OTHER);
+        return PELG_OTHER; // Lobby is not available for settrack test
+    }
+
+    auto forced_track = lobby->getForcedTrack();
+    if (!forced_track.empty())
+    {
+        auto tracks = getClientAssets().second;
+        if (tracks.find(forced_track) == tracks.cend())
+        {
+            m_last_eligibility.store(PELG_NO_FORCED_TRACK);
+            return PELG_NO_FORCED_TRACK;
+        }
+    }
+
+    if (!lobby->checkAllStandardContentInstalled(this))
+    {
+        m_last_eligibility.store(PELG_NO_STANDARD_CONTENT);
+        return PELG_NO_STANDARD_CONTENT;
+    }
+
+    if (ServerConfig::m_command_kart_mode && hasPlayerProfiles() && getPlayerProfiles()[0]->getForcedKart().empty())
+    {
+        m_last_eligibility.store(PELG_PRESET_KART_REQUIRED);
+        return PELG_PRESET_KART_REQUIRED;
+    }
+    if (ServerConfig::m_command_track_mode && forced_track.empty())
+    {
+        m_last_eligibility.store(PELG_PRESET_TRACK_REQUIRED);
+        return PELG_PRESET_TRACK_REQUIRED;
+    }
+    // In other cases, everything is okay.
+    m_last_eligibility.store(PELG_YES);
+    return PELG_YES;
 }

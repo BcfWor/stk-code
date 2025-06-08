@@ -52,11 +52,12 @@ ServerPermissionLevel
 
     return PERM_NONE;
 }
+// why?
 int getPeerPermissionLevel(STKPeer* p)
 {
     if (!p->hasPlayerProfiles()) 
     {
         return PERM_NONE;
     }
-    return p->getPlayerProfiles()[0]->getPermissionLevel();
+    return p->getPermissionLevel();
 }

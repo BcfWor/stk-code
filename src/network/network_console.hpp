@@ -19,10 +19,16 @@
 #ifndef HEADER_NETWORK_CONSOLE_HPP
 #define HEADER_NETWORK_CONSOLE_HPP
 
+#include "lobby/stk_command_context.hpp"
+#include <memory>
+
 class STKHost;
 
 namespace NetworkConsole
 {
+
+    extern std::shared_ptr<STKCommandContext> network_console_context;
+
     void mainLoop(STKHost* host);
 };   // class NetworkConsole
 

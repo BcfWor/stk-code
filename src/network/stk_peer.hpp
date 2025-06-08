@@ -26,6 +26,7 @@
 #include "utils/no_copy.hpp"
 #include "utils/time.hpp"
 #include "utils/types.hpp"
+#include "lobby/stk_command_context.hpp"
 
 #include <enet/enet.h>
 
@@ -68,6 +69,20 @@ enum AlwaysSpectateMode : uint8_t
     ASM_FULL = 2, //!< Set by server because too many players joined
 };   // AlwaysSpectateMode
 
+enum PeerEligibility : uint8_t
+{
+    PELG_YES = 0,
+    PELG_SPECTATOR = 1,
+    PELG_ACCESS_DENIED = 2,
+    PELG_NO_FORCED_TRACK = 3,
+    PELG_NO_STANDARD_CONTENT = 4,
+    // Command kart mode
+    PELG_PRESET_KART_REQUIRED = 5,
+    // Command track mode
+    PELG_PRESET_TRACK_REQUIRED = 6,
+    PELG_OTHER = 255,
+};   // PeerEligibility
+
 /*! \class STKPeer
  *  \brief Represents a peer.
  *  This class is used to interface the ENetPeer structure.
@@ -85,6 +100,10 @@ protected:
 
     /** True if this peer is waiting for game. */
     std::atomic_bool m_waiting_for_game;
+
+    /** Cache: whether the peer has been found to be unable to play the game
+     *  by ServerLobby or other checks. */
+    std::atomic<PeerEligibility> m_last_eligibility;
 
     std::atomic_bool m_spectator;
 
@@ -131,6 +150,20 @@ protected:
     std::set<std::string> m_client_capabilities;
 
     std::array<int, AS_TOTAL> m_addons_scores;
+
+    /** Cached value for permissions. Usually updated by ServerLobby. */
+    uint32_t m_permission_level;
+
+    /** Veto level: 0 is for no veto, 80 is for lobby commands veto,
+     * 100 is for track selection veto. Cannot be set higher than
+     * the permission level defined by the server lobby. */
+    uint32_t m_veto;
+
+    // Player restrictions are defined by the flag enum PeerRestriction
+    uint32_t m_restrictions;
+
+    /** For handling server command in ServerLobby */
+    std::shared_ptr<STKCommandContext> m_command_context;
 public:
     STKPeer(ENetPeer *enet_peer, STKHost* host, uint32_t host_id);
     // ------------------------------------------------------------------------
@@ -314,7 +347,67 @@ public:
             m_always_spectate.store(ASM_NONE);
     }
     // ------------------------------------------------------------------------
-    int getPermissionLevel() const;
+    std::shared_ptr<STKCommandContext>& getCommandContext()
+                                                  { return m_command_context; }
+    // ------------------------------------------------------------------------
+    bool isEligibleForGame() const
+    {
+        return m_last_eligibility.load() == PELG_YES;
+    }
+    // ------------------------------------------------------------------------
+    PeerEligibility getEligibility() const
+    {
+        return m_last_eligibility.load();
+    }
+    // ------------------------------------------------------------------------
+    void setEligibility(const PeerEligibility value)
+    {
+        m_last_eligibility.store(value);
+    }
+    // ------------------------------------------------------------------------
+    // Moderation toolkit
+    // ------------------------------------------------------------------------
+    const int32_t getPermissionLevel() const     { return m_permission_level; }
+    // ------------------------------------------------------------------------
+    void setPermissionLevel(const int32_t lvl)    { m_permission_level = lvl; }
+    // ------------------------------------------------------------------------
+    uint32_t getVeto() const                                 { return m_veto; }
+    // ------------------------------------------------------------------------
+    void setVeto(const uint32_t v)                              { m_veto = v; }
+    // ------------------------------------------------------------------------
+    uint32_t getRestrictions() const                 { return m_restrictions; }
+    // ------------------------------------------------------------------------
+    void setRestrictions(const uint32_t r)              { m_restrictions = r; }
+    // ------------------------------------------------------------------------
+    void clearRestrictions()                       { m_restrictions = PRF_OK; }
+    // ------------------------------------------------------------------------
+    void addRestriction(const PlayerRestriction restriction)
+                                             { m_restrictions |= restriction; }
+    // ------------------------------------------------------------------------
+    void removeRestriction(const PlayerRestriction restriction)
+                                            { m_restrictions &= ~restriction; }
+    // ------------------------------------------------------------------------
+    bool notRestrictedBy(const PlayerRestriction restriction) const
+                                      { return ~m_restrictions & restriction; }
+    // ------------------------------------------------------------------------
+    bool hasRestriction(const PlayerRestriction restriction) const
+                                       { return m_restrictions & restriction; }
+    // ------------------------------------------------------------------------
+    // this functionality could be taken from ServerLobby. Typically contains all the necessary checks
+    // that can confirm that the player is eligible to be present in the queue
+    // for when the player presses the ready button. 
+    // When at least one of the factors change, eligibility must always tested again.
+    // returns true when the peer can play in the first place:
+    // - not a spectator (alwaysSpectate returns false)
+    // - has a forced track on the server lobby
+    // - not restricted from playing (no PRF_NOGAME)
+    // - has permission level of at least PERM_PLAYER
+    // - on command kart and command track mode the kart and track is set
+    // ...other factors specify here... but that's it for now.
+    PeerEligibility testEligibility();
+    // NOTE: For the future versions, when required, individual permission
+    // flags can be implemented alongside the rank-based permission set
+
 };   // STKPeer
 
 #endif // STK_PEER_HPP

@@ -130,7 +130,7 @@ public:
     virtual void saveAddressToIpBanTable(const SocketAddress& addr) = 0;
     virtual void onPlayerJoinQueries(std::shared_ptr<STKPeer> peer, uint32_t online_id,
         unsigned player_count, const std::string& country_code) = 0;
-    virtual void listBanTable() = 0;
+    virtual void listBanTable(std::stringstream& out) = 0;
 
     /* Moderation toolkit */
     virtual int loadPermissionLevelForOID(uint32_t online_id) = 0;

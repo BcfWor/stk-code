@@ -512,12 +512,6 @@ void Powerup::use()
  */
 void Powerup::hitBonusBox(const ItemState &item_state)
 {
-     if (RaceManager::get()->getItemlessMode())
-	     return;
-     if (RaceManager::get()->getItemlessMode() ||
-		     (m_type == PowerupManager::POWERUP_ZIPPER && RaceManager::get()->getNitrolessMode()))
-	     return;
-
     // Position can be -1 in case of a battle mode (which doesn't have
     // positions), but this case is properly handled in getRandomPowerup.
     int position = m_kart->getPosition();
@@ -590,14 +584,16 @@ void Powerup::hitBonusBox(const ItemState &item_state)
             m_number = 0;
             set(PowerupManager::POWERUP_BOWLING, 3);
             return;
-	case TSM_CAKEPARTY:
-	    m_number = 0;
-	    set(PowerupManager::POWERUP_CAKE, 2);
-	    return;
-	case TSM_BOWLTRAININGPARTY:
-	    m_number = 0;
-	    set(PowerupManager::POWERUP_BOWLING, 1);
-	    return;
+        case TSM_CAKEPARTY:
+            m_number = 0;
+            set(PowerupManager::POWERUP_CAKE, 2);
+            return;
+        case TSM_BOWLTRAININGPARTY:
+            m_number = 0;
+            set(PowerupManager::POWERUP_BOWLING, 1);
+            return;
+        case TSM_ITEMLESS:
+            return;
         default:
             new_powerup = powerup_manager->getRandomPowerup(
                     position, &n, random_number, kart_id);

@@ -20,7 +20,29 @@
 #ifndef LOBBY_POLE_HPP
 #define LOBBY_POLE_HPP
 
+#include "network/stk_peer.hpp"
+#include "network/network_player_profile.hpp"
+#include <map>
+
 class Pole
-{};
+{
+public:
+    typedef std::map<STKPeer*,
+                      std::weak_ptr<NetworkPlayerProfile>>
+        PoleVoterMap;
+    typedef std::map<STKPeer* const,
+                      std::weak_ptr<NetworkPlayerProfile>>
+        PoleVoterConstMap;
+    typedef std::pair<STKPeer* const,
+                      std::weak_ptr<NetworkPlayerProfile>>
+        PoleVoterConstEntry;
+    typedef std::pair<std::weak_ptr<NetworkPlayerProfile>,
+                      unsigned int>
+        PoleVoterResultEntry;
+    typedef std::pair<const std::weak_ptr<NetworkPlayerProfile>,
+                      unsigned int>
+        PoleVoterConstResultEntry;
+
+};
 
 #endif // LOBBY_POLE_HPP

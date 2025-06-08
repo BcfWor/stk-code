@@ -19,6 +19,7 @@
 #ifndef SQLITE_DATABASE_HPP
 #define SQLITE_DATABASE_HPP
 
+#include <sstream>
 extern "C"
 {
 
@@ -141,7 +142,7 @@ public:
     virtual void saveAddressToIpBanTable(const SocketAddress& addr) OVERRIDE;
     virtual void onPlayerJoinQueries(std::shared_ptr<STKPeer> peer, uint32_t online_id,
         unsigned player_count, const std::string& country_code) OVERRIDE;
-    virtual void listBanTable() OVERRIDE;
+    virtual void listBanTable(std::stringstream& out) OVERRIDE;
     /* Moderation toolkit */
     virtual int loadPermissionLevelForOID(uint32_t online_id) OVERRIDE;
     virtual int loadPermissionLevelForUsername(const irr::core::stringw& name) OVERRIDE;

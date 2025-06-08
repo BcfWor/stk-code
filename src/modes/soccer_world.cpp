@@ -51,6 +51,7 @@
 #include "modes/soccer_roulette.hpp"
 #include <IMeshSceneNode.h>
 #include <numeric>
+#include <sstream>
 #include <string>
 #include "utils/string_utils.hpp"
 
@@ -547,14 +548,11 @@ void GoalHistory::addGoalData(const std::string& player, float speed, int team)
     s_goal_history.push_back(goal);
 }
 //-----------------------------------------------------------------------------
-void GoalHistory::showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team)
+void GoalHistory::showTeamGoalHistory(std::stringstream& oss, int team)
 {
-    auto sl = LobbyProtocol::get<ServerLobby>();
-
     if (s_goal_history.empty())
     {
-        std::string msg = "No goals scored yet!";
-	sl->sendStringToPeer(msg, peer);
+        oss << "No goals scored yet!";
         return;
     }
 
@@ -565,17 +563,15 @@ void GoalHistory::showTeamGoalHistory(std::shared_ptr<STKPeer> peer, int team)
         {
             found_goals = true;
             std::string team_color = (team == 0) ? "Red" : "Blue";
-            std::string message = team_color + " goal by " + goal.player_name +
+            oss << team_color + " goal by " + goal.player_name +
                                 " with " + std::to_string((int)goal.speed) + " km/h";
-            sl->sendStringToPeer(message, peer);
         }
     }
 
     if (!found_goals)
     {
         std::string team_color = (team == 0) ? "Red" : "Blue";
-        std::string msg = "No goals scored by " + team_color + " team yet!";
-	sl->sendStringToPeer(msg, peer);
+        oss << "No goals scored by " + team_color + " team yet!";
     }
 }
 //-----------------------------------------------------------------------------

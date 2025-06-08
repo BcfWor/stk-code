@@ -19,6 +19,8 @@
 #include "karts/abstract_kart.hpp"
 #include "karts/kart_properties.hpp"
 #include "karts/kart_properties_manager.hpp"
+#include "lobby/server_lobby_commands.hpp"
+#include "lobby/stk_command_context.hpp"
 #include "network/network_config.hpp"
 #include "network/network_player_profile.hpp"
 #include "network/network_string.hpp"
@@ -46,6 +48,9 @@
 
 namespace NetworkConsole
 {
+
+    std::shared_ptr<STKCommandContext> network_console_context;
+
 #ifndef WIN32
 std::string g_cmd_buffer;
 #endif
@@ -101,19 +106,29 @@ bool pollCommand()
 // ----------------------------------------------------------------------------
 void mainLoop(STKHost* host)
 {
+
+    network_console_context = std::make_shared<STKCommandContext>();
+    network_console_context->set_peer(nullptr);
+
     VS::setThreadName("NetworkConsole");
 
 #ifndef WIN32
     g_cmd_buffer.clear();
 #endif
 
-    showHelp();
     std::string str = "";
     while (!host->requestedShutdown())
     {
 #ifndef WIN32
         if (!pollCommand())
             continue;
+        if (g_cmd_buffer.empty())
+            continue;
+
+        // Screw everything below, use the ServerLobbyCommands command system
+        ServerLobbyCommands::get()->handleNetworkConsoleCommand(g_cmd_buffer);
+        g_cmd_buffer.clear();
+        continue;
 
         std::stringstream ss(g_cmd_buffer);
         if (g_cmd_buffer.empty())
@@ -121,9 +136,12 @@ void mainLoop(STKHost* host)
         g_cmd_buffer.clear();
 #else
         getline(std::cin, str);
+
+        continue;
         std::stringstream ss(str);
 #endif
 
+#if 0
         //int number = -1;
         std::string str2 = "";
         ss >> str >> str2;
@@ -134,7 +152,7 @@ void mainLoop(STKHost* host)
         else if (str == "quit")
         {
             host->requestShutdown();
-        }
+        } // CHECK
         else if (str == "slots" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -150,7 +168,7 @@ void mainLoop(STKHost* host)
             }
 
             sl->setMaxPlayersInGame(max_players_in_game, true);
-        }
+        } // CHECK
         else if (str == "addtime" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -163,7 +181,7 @@ void mainLoop(STKHost* host)
 
             sl->changeTimeout(amount_sec);
             std::cout << "Timeout changed by " << amount_sec << "." << std::endl;
-        }
+        } // CHECK
         else if (str == "heavyparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -185,7 +203,7 @@ void mainLoop(STKHost* host)
                 message += "INACTIVE. All karts can be chosen.";
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if (str == "mediumparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -207,7 +225,7 @@ void mainLoop(STKHost* host)
                 message += "INACTIVE. All karts can be chosen.";
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if (str == "lightparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -229,7 +247,7 @@ void mainLoop(STKHost* host)
                 message += "INACTIVE. All karts can be chosen.";
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if (str == "bowlparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -251,7 +269,7 @@ void mainLoop(STKHost* host)
                 message += "INACTIVE. All standard items as normal.";
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if (str == "cakeparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -273,7 +291,7 @@ void mainLoop(STKHost* host)
                 message += "INACTIVE. All standard items as normal.";
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if (str == "chaosparty" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -304,7 +322,7 @@ void mainLoop(STKHost* host)
                 continue;
             const bool state = str2 == "on";
             RaceManager::get()->setInfiniteMode(state);
-        }
+        } // CHECK
         else if (str == "start" && NetworkConfig::get()->isServer())
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -319,7 +337,7 @@ void mainLoop(STKHost* host)
 
             sl->startSelection();
             std::cout << "Made the game start." << std::endl;
-        }
+        } // CHECK
         else if ((str == "end" || str == "lobby") && NetworkConfig::get()->isServer())
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -348,7 +366,7 @@ void mainLoop(STKHost* host)
                     return !p->isWaitingForGame();
                 }, ns, true/*reliable*/);
             std::cout << "Made the game end." << std::endl;
-        }
+        } // CHECK
         else if (str == "bc" || str == "broadcast")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -368,7 +386,7 @@ void mainLoop(STKHost* host)
                 continue;
             }
             sl->sendStringToAllPeers(message);
-        }
+        } // CHECK
         else if ((str == "to" || str == "dm") && str2 != "")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -406,7 +424,7 @@ void mainLoop(STKHost* host)
                 std::cout << "Message sent to " <<
                     StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()
                     ) << "." << std::endl;
-        }
+        } // CHECK
         else if (str == "pole" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -435,7 +453,7 @@ void mainLoop(STKHost* host)
             }
 
             sl->setPoleEnabled(state);
-        }
+        } // CHECK
         else if (str == "kickall")
         {
             auto peers = host->getPeers();
@@ -443,7 +461,7 @@ void mainLoop(STKHost* host)
             {
                 peers[i]->kick();
             }
-        }
+        } // CHECK
         else if (str == "kick" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -452,7 +470,7 @@ void mainLoop(STKHost* host)
                 peer->kick();
             else
                 std::cout << "Unknown player: " << str2 << std::endl;
-        }
+        } // CHECK
         else if (str == "kickban" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -468,7 +486,7 @@ void mainLoop(STKHost* host)
             }
             else
                 std::cout << "Unknown player: " << str2 << std::endl;
-        }
+        } // REMOVED
         else if (str == "unban" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -480,7 +498,7 @@ void mainLoop(STKHost* host)
                 sl->removeIPBanTable(addr);
                 std::cout << "IP address has been unbanned." << std::endl;
             }
-        }
+        } // CHECK
         else if (str == "onlineban" && str2 != "" &&
             NetworkConfig::get()->isServer())
         {
@@ -520,7 +538,7 @@ void mainLoop(STKHost* host)
             std::cout << "Player has been banned for " << days << " days because of " <<
                 (reason.empty() ? reason : "(unspecified)") << "." << std::endl;
             
-        }
+        } // CHECK (ban)
         else if (str == "onlineunban")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -541,7 +559,7 @@ void mainLoop(STKHost* host)
             }
 
             std::cout << "Player has been unbanned." << std::endl;
-        }
+        } // CHECK (unban)
         else if (str == "listpeers")
         {
             auto peers = host->getPeers();
@@ -554,20 +572,20 @@ void mainLoop(STKHost* host)
 		    StringUtils::wideToUtf8(peers[i]->getPlayerProfiles()[0]->getName()) << " " <<
                     peers[i]->getUserVersion() << std::endl;
             }
-        }
+        } // CHECK
         else if (str == "listban")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
             if (sl)
                 sl->listBanTable();
-        }
+        } // CHECK
         else if (str == "speedstats")
         {
             std::cout << "Upload speed (KBps): " <<
                 (float)host->getUploadSpeed() / 1024.0f <<
                 "   Download speed (KBps): " <<
                 (float)host->getDownloadSpeed() / 1024.0f  << std::endl;
-        }
+        } // CHECK
         // MODERATION TOOLKIT
         else if (str == "setplayer")
         {
@@ -575,12 +593,12 @@ void mainLoop(STKHost* host)
             if (!sl)
                 continue;
 
-            auto player = STKHost::get()->findPeerByName(
+            auto peer = STKHost::get()->findPeerByName(
                 StringUtils::utf8ToWide(str2)
             );
-            if (player)
+            if (peer)
             {
-                player->getPlayerProfiles()[0]->setPermissionLevel(
+                peer->setPermissionLevel(
                         ServerPermissionLevel::PERM_PLAYER);
             }
             uint32_t oid = sl->lookupOID(str2);
@@ -598,12 +616,12 @@ void mainLoop(STKHost* host)
             if (!sl)
                 continue;
 
-            auto player = STKHost::get()->findPeerByName(
+            auto peer = STKHost::get()->findPeerByName(
                 StringUtils::utf8ToWide(str2)
             );
-            if (player)
+            if (peer)
             {
-                player->getPlayerProfiles()[0]->setPermissionLevel(
+                peer->setPermissionLevel(
                         ServerPermissionLevel::PERM_MODERATOR);
             }
             uint32_t oid = sl->lookupOID(str2);
@@ -627,7 +645,7 @@ void mainLoop(STKHost* host)
 
             if (player)
             {
-                player->getPlayerProfiles()[0]->setPermissionLevel(
+                player->setPermissionLevel(
                         ServerPermissionLevel::PERM_ADMINISTRATOR);
             }
             uint32_t oid = sl->lookupOID(str2);
@@ -653,13 +671,13 @@ void mainLoop(STKHost* host)
             if (!sl)
                 continue;
 
-            auto player = STKHost::get()->findPeerByName(
+            auto peer = STKHost::get()->findPeerByName(
                 StringUtils::utf8ToWide(str2)
             );
 
-            if (player)
+            if (peer)
             {
-                player->getPlayerProfiles()[0]->setPermissionLevel(
+                peer->setPermissionLevel(
                         lvl);
             }
             uint32_t oid = sl->lookupOID(str2);
@@ -670,7 +688,7 @@ void mainLoop(STKHost* host)
             else
                 sl->writePermissionLevelForOID(oid, lvl);
             std::cout << "Set " << str2 << " to " << lvl << "." << std::endl;
-        }
+        } // CHECK
         else if (str == "restrict")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -712,14 +730,14 @@ void mainLoop(STKHost* host)
             {
                 auto& targetPlayer = target->getPlayerProfiles()[0];
                 if (!state && restriction == PRF_OK)
-                    targetPlayer->clearRestrictions();
+                    target->clearRestrictions();
                 else if (state)
-                    targetPlayer->addRestriction(restriction);
+                    target->addRestriction(restriction);
                 else
-                    targetPlayer->removeRestriction(restriction);
+                    target->removeRestriction(restriction);
                 sl->writeRestrictionsForUsername(
                         targetPlayer->getName(),
-                        targetPlayer->getRestrictions());
+                        target->getRestrictions());
             }
 
             uint32_t online_id = sl->lookupOID(playername);
@@ -732,7 +750,7 @@ void mainLoop(STKHost* host)
                     playername << ". " << std::endl;
                 continue;
             }
-        }
+        } // CHECK
         else if (str == "setteam")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -772,7 +790,7 @@ void mainLoop(STKHost* host)
 
             std::cout << "Set player team to " << str2 << " for " << 
                 StringUtils::wideToUtf8(player->getName())<< std::endl;
-        }
+        } // CHECK
         else if (str == "setkart")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -834,8 +852,8 @@ void mainLoop(STKHost* host)
                     " use kart " << str2 << "." << std::endl;
             }
 
-        }
-        else if ((str == "setfield" || str == "settrack" || str == "setarena")
+        } // CHECK
+        else if ((str == "setfield" || str == "settrack" || str == "setarena") 
                 && !str2.empty() && NetworkConfig::get()->isServer())
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -865,14 +883,14 @@ void mainLoop(STKHost* host)
                 laps = std::stoi(str_laps);
             
             // Check that peer and server have the track
-            bool found = sl->forceSetTrack(soccer_field_id, laps, specvalue == "on", isField, true);
+            bool found = sl->setForcedTrack(soccer_field_id, laps, specvalue == "on", isField, true);
             if (!found)
             {
                 std::cout << (isField ? "Soccer field \'" : "Track \'") << soccer_field_id << "\' does not exist or is not installed."
                     << std::endl;
                 continue;
             }
-        }
+        } // CHECK
         else if (str == "sethandicap")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -912,7 +930,7 @@ void mainLoop(STKHost* host)
 
             std::cout << "Set player handicap to " << str2 << " for " << 
                 StringUtils::wideToUtf8(player->getName())<< std::endl;
-        }
+        } // CHECK
         // CHEATS
         else if (str == "hackitem" || str == "hki")
         {
@@ -1005,7 +1023,7 @@ void mainLoop(STKHost* host)
                     target_peer->getPlayerProfiles()[0]->getName()).c_str());
             std::cout << msg << std::endl;
 
-        }
+        } // CHECK
         else if (str == "hacknitro" || str == "hkn")
         {
             auto sl = LobbyProtocol::get<ServerLobby>();
@@ -1076,7 +1094,7 @@ void mainLoop(STKHost* host)
                     target_peer->getPlayerProfiles()[0]->getName()).c_str());
             std::cout << msg << std::endl;
 
-        }
+        } // CHECK
         else if (str == "replay" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1100,7 +1118,7 @@ void mainLoop(STKHost* host)
                 msg = "Recording of the new replay is cancelled.";
             sl->sendStringToAllPeers(msg);
             std::cout << msg << std::endl;
-        }
+        } // CHECK
         else if (str == "setowner" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1129,7 +1147,7 @@ void mainLoop(STKHost* host)
             sl->updateServerOwner(peer);
 
             std::cout << "Owner has been changed." << std::endl;
-        }
+        } // CHECK
         else if (str == "setmode" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1160,7 +1178,7 @@ void mainLoop(STKHost* host)
 
             std::cout << "Changed mode to " << RaceManager::get()->getMinorModeName() << 
                 "." << std::endl;
-        }
+        } // CHECK
         else if ((str == "setdifficulty" || str == "setdiff") && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1184,7 +1202,7 @@ void mainLoop(STKHost* host)
             std::cout << "Changed difficulty to " << 
                 RaceManager::get()->getDifficultyAsString(RaceManager::get()->getDifficulty()) << 
                 "." << std::endl;
-        }
+        } // CHECK
         else if (str == "setgoaltarget" && !str2.empty() &&
                 NetworkConfig::get()->isServer())
         {
@@ -1201,11 +1219,12 @@ void mainLoop(STKHost* host)
 
             std::cout << "Changed goal target to " << (state ? "on" : "off") << 
                 "." << std::endl;
-        }
+        } // CHECK
         else
         {
             std::cout << "Unknown command: " << str << std::endl;
         }
+#endif
     }   // while !stop
     main_loop->requestAbort();
 }   // mainLoop

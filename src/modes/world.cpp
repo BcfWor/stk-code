@@ -136,15 +136,32 @@ World::World() : WorldStatus()
     m_magic_number = 0xB01D6543;
 #endif
 
+    m_red_ai             = 0;
+    m_blue_ai            = 0;
     m_race_gui           = NULL;
     m_saved_race_gui     = NULL;
+    m_fastest_kart       = NULL;
+    m_eliminated_karts   = 0;
+    m_eliminated_players = 0;
+    m_num_players        = 0;
+    m_faster_music_active
+                         = false;
+    m_stop_music_when_dialog_open
+                         = true;
+    m_unfair_team        = false;
     m_use_highscores     = true;
     m_schedule_pause     = false;
     m_schedule_unpause   = false;
     m_schedule_exit_race = false;
     m_schedule_tutorial  = false;
+    m_schedule_interrupt_race 
+                         = false;
+    m_scheduled_pause_phase
+                         = TRACK_INTRO_PHASE;
+    m_self_destruct      = false;
     m_is_network_world   = false;
-    m_restart_camera        = false;
+    m_restart_camera     = false;
+    m_ended_early        = false;
 
     m_stop_music_when_dialog_open = true;
 

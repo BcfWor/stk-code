@@ -29,6 +29,9 @@
 #include "karts/kart_properties.hpp"
 #include "karts/kart_properties_manager.hpp"
 #include "karts/official_karts.hpp"
+#include "lobby/player_queue.hpp"
+#include "lobby/rps_challenge.hpp"
+#include "lobby/server_lobby_commands.hpp"
 #include "modes/capture_the_flag.hpp"
 #include "modes/linear_world.hpp"
 #include "modes/soccer_world.hpp"
@@ -134,26 +137,6 @@ public:
         }
     }
 };   // UpdatePlayerRankingRequest
-// ========================================================================
-
-class STKSeenRequest : public Online::XMLRequest {
-    private:
-    std::string addr = ServerConfig::m_ishigami_address;
-    public:
-
-    STKSeenRequest(const std::string& username) : XMLRequest(Online::RequestManager::HTTP_MAX_PRIORITY) {
-        setURL(addr + "/stk-seen");
-        addParameter("username", username);
-    };
-    virtual void afterOperation() {
-        Online::XMLRequest::afterOperation();
-        const XMLNode* result = getXMLData();
-
-        if (!isSuccess()) {
-            Log::error("Ishigami", "Failed to get the STK Seen data.");
-        };
-    }
-};
 
 // ========================================================================
 
@@ -243,7 +226,6 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_items_complete_state = new BareNetworkString();
     m_server_id_online.store(0);
     m_max_players         = ServerConfig::m_server_max_players;
-    m_max_players_in_game = ServerConfig::m_max_players_in_game;
     m_powerupper_active   = false;
     m_difficulty.store(ServerConfig::m_server_difficulty);
     m_game_mode.store(ServerConfig::m_server_mode);
@@ -251,9 +233,9 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_allow_powerupper = ServerConfig::m_allow_powerupper;
     m_show_elo = ServerConfig::m_show_elo;
     m_show_rank = ServerConfig::m_show_rank;
-    m_last_wanrefresh_cmd_time = 0UL;
     m_last_wanrefresh_res = nullptr;
     m_last_wanrefresh_requester.reset();
+    m_last_wanrefresh_is_peer.store(false);
     m_random_karts_enabled = false;
     RaceManager::get()->setInfiniteMode(ServerConfig::m_infinite_game, false);
 
@@ -261,6 +243,8 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_db = new SQLiteDatabase();
     m_db->init();
 #endif
+
+    LobbyPlayerQueue::create();
     m_rps_challenges.clear();
 
     m_jumble_rng.seed(std::random_device{}());
@@ -272,6 +256,7 @@ ServerLobby::ServerLobby() : LobbyProtocol()
  */
 ServerLobby::~ServerLobby()
 {
+    LobbyPlayerQueue::destroy();
     if (m_server_id_online.load() != 0)
     {
         // For child process the request manager will keep on running
@@ -301,42 +286,6 @@ void ServerLobby::initServerStatsTable()
 #endif
 }   // initServerStatsTable
 
-//-----------------------------------------------------------------------------
-// This to be moved into the finalizer of the network/database/abstract_database.hpp
-// and the sqlite3 implementation as well, to their respective abstraction layers
-#if 0
-void ServerLobby::destroyDatabase()
-{
-#ifdef ENABLE_SQLITE3
-    auto peers = STKHost::get()->getPeers();
-    for (auto& peer : peers)
-        writeDisconnectInfoTable(peer.get());
-    if (m_db != NULL)
-        sqlite3_close(m_db);
-#endif
-}   // destroyDatabase
-
-//-----------------------------------------------------------------------------
-void ServerLobby::writeDisconnectInfoTable(STKPeer* peer)
-{
-    // This to be moved into the finalizer of the network/database/abstract_database.hpp
-    // and the sqlite3 implementation as well, to their respective abstraction layers
-
-#ifdef ENABLE_SQLITE3
-    if (m_server_stats_table.empty())
-        return;
-    std::string query = StringUtils::insertValues(
-        "UPDATE %s SET disconnected_time = datetime('now'), "
-        "ping = %d, packet_loss = %d "
-        "WHERE host_id = %u;", m_server_stats_table.c_str(),
-        peer->getAveragePing(), peer->getPacketLoss(),
-        peer->getHostId());
-    easySQLQuery(query);
-#endif
-}   // writeDisconnectInfoTable
-
-//-----------------------------------------------------------------------------
-#endif
 void ServerLobby::updateAddons()
 {
     m_addon_kts.first.clear();
@@ -646,8 +595,7 @@ void ServerLobby::handleChat(Event* event)
         else if (target_team == KART_TEAM_BLUE)
             message = StringUtils::utf32ToWide({0x1f7e6, 0x20}) + message;
 
-        //teamchat
-        //auto can_receive = m_message_receivers[sender];
+        // teamchat
         bool team_speak = m_team_speakers.find(sender) != m_team_speakers.end();
 
         // make a function of it for god sake, or at least a macro
@@ -666,8 +614,8 @@ void ServerLobby::handleChat(Event* event)
         }
 
         // check if the sender_profile is authorised to send the message
-        if (!sender_profile || sender_profile->hasRestriction(PRF_NOCHAT) ||
-                sender_profile->getPermissionLevel() <= PERM_NONE)
+        if (sender->hasRestriction(PRF_NOCHAT) ||
+                sender->getPermissionLevel() <= PERM_NONE)
         {
             // very evil chat log
             Log::info("ServerLobby", "[MUTED] %s", StringUtils::wideToUtf8(message).c_str());
@@ -704,12 +652,6 @@ void ServerLobby::handleChat(Event* event)
                     // separates the chat between lobby peers, and ingame players/spectators
                     if (!global_chat && p->isWaitingForGame() != sender_in_lobby)
                         return false;
-#if 0
-                    if (p->isWaitingForGame() && !sender_in_game)
-                        return false;
-                    if (!p->isWaitingForGame() && sender_in_game)
-                        return false;
-#endif
                     // when targeted towards one team, send it.
                     if (target_team != KART_TEAM_NONE)
                     {
@@ -718,9 +660,6 @@ void ServerLobby::handleChat(Event* event)
                         for (auto& player : p->getPlayerProfiles())
                         {
                             if (player->getTeam() == target_team
-#if 0
-                                || player->getPermissionLevel() >= PERM_MODERATOR
-#endif
                                 )
                                 return true;
                         }
@@ -732,9 +671,6 @@ void ServerLobby::handleChat(Event* event)
                 {
                     for (auto& profile : p->getPlayerProfiles())
                         if (teams.count(profile->getTeam()) > 0
-#if 0
-                                || player->getPermissionLevel() >= PERM_MODERATOR
-#endif
                             )
                             return true;
                     return false;
@@ -748,19 +684,6 @@ void ServerLobby::handleChat(Event* event)
                             return false;
                     }
                 }
-#if 0
-                // incase of no /to
-                if (can_receive.empty())
-                    return true;
-                for (auto& profile : p->getPlayerProfiles())
-                {
-                    if (can_receive.find(profile->getName()) !=
-                        can_receive.end())
-                    {
-                        return true;
-                    }
-                }
-#endif
                 return true;
             }, chat);
             event->getPeer()->updateLastMessage();
@@ -769,7 +692,7 @@ void ServerLobby::handleChat(Event* event)
 }   // handleChat
 
 //-----------------------------------------------------------------------------
-//FIXME: add "force" argument that avoids the check for manual team choosing
+// FIXME: add "force" argument that avoids the check for manual team choosing
 void ServerLobby::changeTeam(Event* event)
 {
     if (!ServerConfig::m_team_choosing ||
@@ -781,7 +704,7 @@ void ServerLobby::changeTeam(Event* event)
     auto& player = event->getPeer()->getPlayerProfiles().at(local_id);
 
     // check if player can change teams
-    if (player->hasRestriction(PRF_NOTEAM))
+    if (event->getPeer()->hasRestriction(PRF_NOTEAM))
     {
         Log::info("ServerLobby",
                 "Player %s tried to change teams without permission.",
@@ -931,7 +854,7 @@ bool ServerLobby::notifyEventAsynchronous(Event* event)
             clientSelectingAssetsWantsToBackLobby(event);         break;
         case LE_REPORT_PLAYER: writePlayerReport(event);          break;
         case LE_ASSETS_UPDATE:
-            handleAssets(event->data(), event->getPeer());        break;
+            handleAssets(event->data(), event->getPeerSP());        break;
         case LE_COMMAND:
             handleServerCommand(event, event->getPeerSP());       break;
         default:                                                  break;
@@ -1084,14 +1007,10 @@ void ServerLobby::writePlayerReport(Event* event)
 
 void ServerLobby::sendWANListToPeer(std::shared_ptr<STKPeer> peer)
 {
+    Log::verbose("ServerLobby", "sendWANListToPeer");
     core::stringw responseMsg = L"[Currently played servers]\n";
     std::lock_guard<std::mutex> wr_lock(m_wanrefresh_lock);
-    std::shared_ptr<STKPeer> requester = m_last_wanrefresh_requester.lock();
     // send a message to whoever requested the message
-    NetworkString* response = getNetworkString();
-    response->setSynchronous(true);
-    response->addUInt8(LE_CHAT);
-
     for (std::shared_ptr<Server> serverPtr : m_last_wanrefresh_res->m_servers)
     {
         auto players = serverPtr->getPlayers();
@@ -1126,7 +1045,7 @@ void ServerLobby::sendWANListToPeer(std::shared_ptr<STKPeer> peer)
         }
         responseMsg += L"\n";
         
-        //player list
+        // player list
         for (auto player : players)
         {
             responseMsg += std::get<1>(player);
@@ -1135,9 +1054,14 @@ void ServerLobby::sendWANListToPeer(std::shared_ptr<STKPeer> peer)
         responseMsg += L"\n\n";
     }
 
-    response->encodeString16(responseMsg);
-    peer->sendPacket(response);
-    delete response;
+    if (peer)
+        sendStringToPeer(responseMsg, peer);
+    else
+    {
+        auto ctx = ServerLobbyCommands::getNetworkConsoleContext();
+        ctx->write(StringUtils::wideToUtf8(responseMsg));
+        ctx->flush();
+    }
 }
 //-----------------------------------------------------------------------------
 /** Find out the public IP server or poll STK server asynchronously. */
@@ -1192,10 +1116,13 @@ void ServerLobby::asynchronousUpdate()
 
     // Respond to asynchronous events
     if (m_last_wanrefresh_res && m_last_wanrefresh_res->m_servers.size() &&
-            m_last_wanrefresh_res->m_list_updated.load() &&
-            !m_last_wanrefresh_requester.expired())
+            m_last_wanrefresh_res->m_list_updated.load())
     {
-        sendWANListToPeer(m_last_wanrefresh_requester.lock());
+        if (m_last_wanrefresh_is_peer.load() &&
+                m_last_wanrefresh_requester.expired())
+            Log::verbose("ServerLobby", "last wanrefresh requester is expired");
+        else
+            sendWANListToPeer(m_last_wanrefresh_requester.lock());
         m_last_wanrefresh_res->m_list_updated.store(false);
     }
 
@@ -1379,9 +1306,6 @@ void ServerLobby::asynchronousUpdate()
             {
                 auto pole = decidePoles();
 
-                //RaceManager::get()->setBluePole(pole.first);
-                //RaceManager::get()->setRedPole(pole.second);
-
                 if (pole.first && pole.first->getTeam() == KART_TEAM_BLUE)
                 {
                     STKHost::get()->setForcedSecondPlayer(pole.first);
@@ -1546,7 +1470,16 @@ void ServerLobby::asynchronousUpdate()
             // Reset for next state usage
             resetPeersReady();
             m_state = LOAD_WORLD;
-            sendMessageToPeers(load_world_message);
+
+            // Only those that have the addon will receive the message
+            STKHost::get()->sendPacketToAllPeersWith(
+                    [&](STKPeer* peer)
+                    {
+                        const auto tracks = peer->getClientAssets().second;
+                        return peer->getPermissionLevel() >= PERM_SPECTATOR &&
+                            peer->notRestrictedBy(PRF_NOSPEC) &&
+                            tracks.find(winner_vote.m_track_name) != tracks.cend();
+                    }, load_world_message);
             // updatePlayerList so the in lobby players (if any) can see always
             // spectators join the game
             if (has_always_on_spectators)
@@ -1703,38 +1636,47 @@ void ServerLobby::liveJoinRequest(Event* event)
         return;
     }
 
-    for (auto player : peer->getPlayerProfiles())
+    if (spectator && (peer->hasRestriction(PRF_NOSPEC) ||
+                (peer->getPermissionLevel() < PERM_SPECTATOR)))
     {
-        if (spectator && (player->hasRestriction(PRF_NOSPEC) ||
-                    (player->getPermissionLevel() < PERM_SPECTATOR)))
+        rejectLiveJoin(peer, BLR_NO_PLACE_FOR_LIVE_JOIN);
+        sendStringToPeer(L"You are not allowed to spectate.", peer);
+        return;
+    }
+    else if (!spectator)
+    {
+        const PeerEligibility old_eligibility = peer->getEligibility();
+        const PeerEligibility new_eligibility = peer->testEligibility();
+        LobbyPlayerQueue::get()->onPeerEligibilityChange(event->getPeerSP(), old_eligibility);
+        // test eligibility for not spectating
+        switch (new_eligibility)
         {
-            NetworkString* const response = getNetworkString();
-            response->setSynchronous(true);
-            response->addUInt8(LE_CHAT).encodeString16(
-                L"You are not allowed to spectate.");
-            rejectLiveJoin(peer, BLR_NO_PLACE_FOR_LIVE_JOIN);
-            peer->sendPacket(response, true/*reliable*/);
-            delete response;
-            return;
-        }
-        else if (!spectator && (player->hasRestriction(PRF_NOGAME) || (
-                        player->getPermissionLevel() < PERM_PLAYER)))
-        {
-            NetworkString* const response = getNetworkString();
-            response->setSynchronous(true);
-            response->addUInt8(LE_CHAT).encodeString16(
-                L"You are not allowed to participate in the game.");
-            rejectLiveJoin(peer, BLR_NO_PLACE_FOR_LIVE_JOIN);
-            peer->sendPacket(response, true/*reliable*/);
-            delete response;
-            return;
+            case PELG_YES:
+                break;
+            case PELG_NO_FORCED_TRACK:
+                break;
+            case PELG_SPECTATOR:
+                // alwaysSpectate is set to ASM_COMMAND or ASM_FULL, but the player still wants to live join
+                break;
+            case PELG_PRESET_KART_REQUIRED:
+            {
+                rejectLiveJoin(peer, BLR_NO_PLACE_FOR_LIVE_JOIN);
+                sendStringToPeer(L"You need to set your kart with /setkart [name].", peer);
+                return;
+            }
+            default:
+            {
+                rejectLiveJoin(peer, BLR_NO_PLACE_FOR_LIVE_JOIN);
+                sendStringToPeer(L"You are not allowed to participate in the game.", peer);
+                return;
+            }
         }
     }
+
 
     peer->clearAvailableKartIDs();
     if (!spectator)
     {
-        auto spectators_by_limit = getSpectatorsByLimit();
         setPlayerKarts(data, peer);
 
         std::vector<int> used_id;
@@ -1746,7 +1688,7 @@ void ServerLobby::liveJoinRequest(Event* event)
             used_id.push_back(id);
         }
         if ((used_id.size() != peer->getPlayerProfiles().size()) ||
-            (spectators_by_limit.find(event->getPeerSP()) != spectators_by_limit.end()))
+            LobbyPlayerQueue::get()->isSpectatorByLimit(peer))
         {
             for (unsigned i = 0; i < peer->getPlayerProfiles().size(); i++)
                 peer->getPlayerProfiles()[i]->setKartName("");
@@ -1980,8 +1922,8 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
     w->saveCompleteState(ns, peer.get());
     if (RaceManager::get()->supportsLiveJoining())
     {
-        // Only needed in non-racing mode as no need players can added after
-        // starting of race
+        // This isn't required for modes that don't support live joining, since
+        // there won't be any new players in the world after the race has started.
         std::vector<std::shared_ptr<NetworkPlayerProfile> > players =
             getLivePlayers();
         encodePlayers(ns, players);
@@ -2445,7 +2387,6 @@ void ServerLobby::insertKartsIntoNotType(std::set<std::string>& set, const char*
         const std::string& _type = props->getKartType();
         if (_type != type)
         {
-            //Log::verbose("ServerLobby", "Kart %s has been ruled out, type %s != %s (requred)", kt.c_str(), _type.c_str(), type);
             set.insert(kt);
         }
     }
@@ -2489,8 +2430,9 @@ void ServerLobby::setKartRestrictionMode(const enum KartRestrictionMode mode)
  */
 void ServerLobby::startSelection(const Event *event)
 {		
-	if (event != NULL)
+	if (event)
 	{
+        // ready button pressed
 		std::shared_ptr<STKPeer> peer = event->getPeerSP();
 		if (m_state != WAITING_FOR_START_GAME)
 		{
@@ -2501,60 +2443,62 @@ void ServerLobby::startSelection(const Event *event)
 		}
 
 		// check if player can play
-		for (auto& player : event->getPeer()->getPlayerProfiles())
-		{
-			if (player->hasRestriction(PRF_NOGAME) ||
-					player->getPermissionLevel() < PERM_PLAYER)
-			{
-				NetworkString* const response = getNetworkString();
-				response->setSynchronous(true);
-				response->addUInt8(LE_CHAT).encodeString16(
-						L"You are not allowed to play the game.");
-				event->getPeer()->sendPacket(response, true/*reliable*/);
-				delete response;
-				return;
-			}
-		}
-		auto spectators_by_limit = getSpectatorsByLimit();
-        const bool is_sbl = spectators_by_limit.find(event->getPeerSP()) != spectators_by_limit.end() ||
-            (m_max_players_in_game == 1 && event->getPeer()->alwaysSpectate());
-        // this should give the privilege to immediately start the game
-        const bool not_singleslot = m_max_players_in_game != 1;
-	
-	if (!checkAllStandardContentInstalled(peer))
-	{
-		std::string msg = "You cannot ready up because you are missing required standard tracks.";
-		sendStringToPeer(msg, peer);
-		return;
-	}
-        // when the field is forced, check if the player has the field
-        if (!canRace(peer))
+        const PeerEligibility old_eligibility = peer->getEligibility();
+        const PeerEligibility new_eligibility = peer->testEligibility();
+        LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_eligibility);
+        switch (new_eligibility)
         {
-	    if (m_set_field!="")
+            case PELG_ACCESS_DENIED:
+                sendStringToPeer(L"You are not allowed to play the game.", peer);
+                return;
+            // check if player has standard assets
+            case PELG_NO_STANDARD_CONTENT:
+                sendStringToPeer(L"You cannot ready up because you are missing required standard tracks.", peer);
+                return;
+            // when the field is forced, check if the player has the field
+            case PELG_NO_FORCED_TRACK:
             {
                 std::string msg = "You need to install ";
-                std::shared_ptr<STKPeer> peer = event->getPeerSP();
                 msg += m_set_field;
                 msg += " in order to play. Click the link below to install it:\n/installaddon";
                 msg += m_set_field;
                 sendStringToPeer(msg, peer);
-	    }
+                return;
+            }
+            case PELG_PRESET_KART_REQUIRED:
+            {
+                const std::string msg = "Use /setkart (kart_name) to play the game.";
+                sendStringToPeer(msg, peer);
+                return;
+            }
+            case PELG_PRESET_TRACK_REQUIRED:
+            {
+                const std::string msg = "Use /settrack (track_name) - (reverse? on/off) to play the game.";
+                sendStringToPeer(msg, peer);
+                return;
+            }
+            case PELG_SPECTATOR:
+            {
+                const std::string msg = "You are the spectator.";
+                sendStringToPeer(msg, peer);
+                return;
+            }
+            case PELG_OTHER:
+            {
+                const std::string msg = "You cannot play the game.";
+                sendStringToPeer(msg, peer);
+                return;
+            }
+            case PELG_YES:
+                break;
         }
+        const bool is_sbl = LobbyPlayerQueue::get()->isSpectatorByLimit(peer.get());
+        // this should give the privilege to immediately start the game
+        const bool not_singleslot = LobbyPlayerQueue::get()->getMaxPlayersInGame() != 1;
+	
         if (is_sbl)
         {
             const std::string msg = "You need to wait for the free spot for playing the game.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (ServerConfig::m_command_kart_mode && peer->hasPlayerProfiles() && peer->getPlayerProfiles()[0]->getForcedKart().empty())
-        {
-            const std::string msg = "Use /setkart (kart_name) to play the game.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        if (ServerConfig::m_command_track_mode && m_set_field.empty())
-        {
-            const std::string msg = "Use /settrack (track_name) - (reverse? on/off) to play the game.";
             sendStringToPeer(msg, peer);
             return;
         }
@@ -2575,56 +2519,11 @@ void ServerLobby::startSelection(const Event *event)
             return;
         }
     }
-
-#if 0
-    if (!ServerConfig::m_owner_less && ServerConfig::m_team_choosing &&
-        RaceManager::get()->teamEnabled())
-    {
-	set_powerup_multiplier(1); // ?????
-        auto red_blue = STKHost::get()->getAllPlayersTeamInfo();
-        if ((red_blue.first == 0 || red_blue.second == 0) &&
-            red_blue.first + red_blue.second != 1)
-        {
-            Log::warn("ServerLobby", "Bad team choosing.");
-            if (event)
-            {
-                NetworkString* bt = getNetworkString();
-                bt->setSynchronous(true);
-                bt->addUInt8(LE_BAD_TEAM);
-                event->getPeer()->sendPacket(bt, true/*reliable*/);
-                delete bt;
-            }
-            return;
-        }
-    }
-#endif
+    // ...otherwise (argument == nullptr) the server decides to start the game
 
     // Find if there are peers playing the game
     auto peers = STKHost::get()->getPeers();
-    std::set<STKPeer*> always_spectate_peers;
-    bool has_peer_plays_game = false;
-
-    // Disable always spectate peers if no players join the game
-    if (!has_peer_plays_game)
-    {
-        for (STKPeer* peer : always_spectate_peers)
-        {
-            bool can_play = true;
-            for (auto& player : peer->getPlayerProfiles())
-            {
-                if (player->hasRestriction(PRF_NOGAME) ||
-                    player->getPermissionLevel() <= PERM_SPECTATOR)
-                {
-                    can_play = false;
-                    break;
-                }
-            }
-            if (can_play)
-                peer->setAlwaysSpectate(ASM_NONE);
-        }
-        always_spectate_peers.clear();
-    }
-    else
+    std::set<STKPeer*> always_spectate_peers = LobbyPlayerQueue::get()->getSpectatorsByLimit();
     {
         // We make those always spectate peer waiting for game so it won't
         // be able to vote, this will be reset in STKHost::getPlayersForNewGame
@@ -2640,30 +2539,22 @@ void ServerLobby::startSelection(const Event *event)
     if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
     {
         GlobalLog::writeLog("GAME_START\n", GlobalLogTypes::POS_LOG);
-	time_t now;
+        time_t now;
         time(&now);
         char buf[sizeof "2011-10-08T07:07:09Z"];
         strftime(buf, sizeof buf, "%FT%TZ", gmtime(&now));
-	std::string buf2;
-	for (int i=0;i< sizeof buf - 1 ;i++)
-	    buf2 += buf[i];
-	std::string msg = "Match started at " + buf2 + "\n";
+        std::string buf2;
+        for (int i=0;i< sizeof buf - 1 ;i++)
+            buf2 += buf[i];
+        std::string msg = "Match started at " + buf2 + "\n";
         GlobalLog::writeLog(msg, GlobalLogTypes::POS_LOG);
     }
 
-    // Set late coming player to spectate if too many players
-    auto spectators_by_limit = getSpectatorsByLimit();
-    if (spectators_by_limit.size() == peers.size())
+    if (always_spectate_peers.size() == peers.size())
     {
         Log::error("ServerLobby", "Too many players and cannot set "
             "spectate for late coming players!");
         return;
-    }
-    for (auto &peer : spectators_by_limit)
-    {
-        peer->setAlwaysSpectate(ASM_FULL);
-        peer->setWaitingForGame(true);
-        always_spectate_peers.insert(peer.get());
     }
 
     // Remove karts / tracks from server that are not supported
@@ -2685,36 +2576,27 @@ void ServerLobby::startSelection(const Event *event)
 
     for (auto peer : peers)
     {
+        const PeerEligibility old_eligibility = peer->getEligibility();
+        const PeerEligibility new_eligibility = peer->testEligibility();
+        LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_eligibility);
+        // update eligibility of all peers except the one who pressed the button
+        if ((!event || peer != event->getPeerSP()) && new_eligibility != PELG_YES)
+        {
+            peer->setWaitingForGame(true);
+            if (peer->getPermissionLevel() >= PERM_SPECTATOR &&
+                    peer->notRestrictedBy(PRF_NOSPEC))
+                peer->setAlwaysSpectate(ASM_FULL);
+            always_spectate_peers.insert(peer.get());
+            continue;
+        }
         // Spectators won't remove maps as they are already waiting for game
         if (!peer->isValidated() || peer->isWaitingForGame())
             continue;
         if (!peer->isAIPeer() && peer->hasPlayerProfiles()
-                && peer->getPlayerProfiles()[0]->notRestrictedBy(PRF_NOGAME)
-                && peer->getPlayerProfiles()[0]->getPermissionLevel()
-                        >= PERM_PLAYER && canRace(peer))
+                && peer->isEligibleForGame())
         {
             peer->eraseServerKarts(m_available_kts.first, karts_erase);
             peer->eraseServerTracks(m_available_kts.second, tracks_erase);
-            has_peer_plays_game = true;
-        }
-        else
-        {
-            for (auto& player : peer->getPlayerProfiles())
-            {
-                if (player->getPermissionLevel() >= PERM_SPECTATOR)
-                {
-                    peer->setAlwaysSpectate(ASM_FULL);
-                    peer->setWaitingForGame(true);
-                    always_spectate_peers.insert(peer.get());
-                    break;
-                }
-                if (player->hasRestriction(PRF_NOGAME) ||
-                    player->getPermissionLevel() < PERM_SPECTATOR)
-                {
-                    always_spectate_peers.insert(peer.get());
-                    break;
-                }
-            }
         }
     }
 
@@ -2877,7 +2759,8 @@ skip_default_vote_randomizing:
 
     for (auto peer : peers)
     {
-        if (!peer->isValidated() || peer->isWaitingForGame())
+        if (!peer->isValidated() || !peer->isEligibleForGame() ||
+                peer->isWaitingForGame())
             continue;
 
         auto profiles = peer->getPlayerProfiles();
@@ -2925,25 +2808,6 @@ skip_default_vote_randomizing:
         peer->sendPacket(ns, true/*reliable*/);
         delete ns;
     }
-    //sendMessageToPeers(ns, /*reliable*/true);
-#if 0
-    STKHost::get()->sendPacketToAllPeersWith([this](STKPeer* peer)
-    {
-        if (peer->hasPlayerProfiles() && peer->getPlayerProfiles().size() == 1
-                && !peer->getPlayerProfiles()[0]->getForcedKart().empty())
-        {
-            //AAATODO
-            Log::verbose("ServerLobby", "setKart is used: %s", 
-                    peer->getPlayerProfiles()[0]->getForcedKart().c_str());
-            auto karts = getOtherKartsThan(
-                    peer->getPlayerProfiles()[0]->getForcedKart());
-            peer->eraseServerKarts(m_available_kts.first,
-                karts);
-        }
-        return true;
-    }, ns);
-#endif
-
     m_state = SELECTING;    
     if (!always_spectate_peers.empty())
     {
@@ -3195,7 +3059,7 @@ void ServerLobby::checkRaceFinished()
     m_state.store(WAIT_FOR_RACE_STOPPED);
 
     // Reset command votings
-    m_command_voters.clear();
+    ServerLobbyCommands::get()->clearAllVotes();
     // Remove kart restriction after the game is over
     setKartRestrictionMode(NONE);
     // Remove pole mode after the game is over
@@ -3214,7 +3078,6 @@ void ServerLobby::checkRaceFinished()
         tiers_roulette->rotate();
         tiers_roulette->applyChanges(this, RaceManager::get(), nullptr);
     }
-    RaceManager::get()->setItemlessMode(false);
     RaceManager::get()->setNitrolessMode(false);
     
 }	// checkRaceFinished
@@ -3297,7 +3160,6 @@ void ServerLobby::clientDisconnected(Event* event)
         World* w = World::getWorld();
         if (w)
         {
-            //SoccerWorld *sw = dynamic_cast<SoccerWorld*>(w);
             std::string time = std::to_string(w->getTime());
             for (const auto id : event->getPeer()->getAvailableKartIDs())
             {
@@ -3340,24 +3202,20 @@ void ServerLobby::clientDisconnected(Event* event)
         }
         m_blue_pole_votes.clear();
         m_red_pole_votes.clear();
-	RaceManager::get()->setItemlessMode(false);
-	RaceManager::get()->setNitrolessMode(false);
+        RaceManager::get()->setNitrolessMode(false);
 
         if (m_replay_requested && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_TIME_TRIAL)
-	{
-
-		m_replay_requested = false;
-	}
-	if (ServerConfig::m_soccer_log || (ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER))
-	{
+            m_replay_requested = false;
+        if (ServerConfig::m_soccer_log || (ServerConfig::m_race_log && RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_SOCCER))
+        {
             std::ofstream log_file(ServerConfig::m_live_soccer_log_path, std::ios::app);
             log_file << "Everyone left, game ended";
             log_file.close();
-	}
-	if (m_random_karts_enabled)
-	{
-		m_random_karts_enabled = false;
-	}
+        }
+        if (m_random_karts_enabled)
+        {
+            m_random_karts_enabled = false;
+        }
     }
     else 
     {
@@ -3369,7 +3227,8 @@ void ServerLobby::clientDisconnected(Event* event)
             m_red_pole_votes.erase(r);
     }
     RaceManager::get()->resetPoleProfile(event->getPeer());
-    // reset player command votings
+    // reset player command votings. TODO: delete
+#if 0
     if (ServerConfig::m_command_voting && peer->hasPlayerProfiles())
     {
         const std::string& pname = StringUtils::wideToUtf8(
@@ -3385,12 +3244,17 @@ void ServerLobby::clientDisconnected(Event* event)
             m_command_voters[cmd.first].erase(found);
         }
     }
+#endif
     // send a message to the wrapper
     if (peer->hasPlayerProfiles())
         Log::verbose("ServerLobby", "playerleave %s %d",
-                StringUtils::wideToUtf8(
-                    peer->getPlayerProfiles()[0]->getName()).c_str(),
+            StringUtils::wideToUtf8(
+                peer->getPlayerProfiles()[0]->getName()).c_str(),
                 peer->getPlayerProfiles()[0]->getOnlineId());
+
+    ServerLobbyCommands::get()->onPeerLeave(this, peer);
+    LobbyPlayerQueue::get()->onPeerLeave(peer);
+
 }   // clientDisconnected
 
 //-----------------------------------------------------------------------------
@@ -3432,7 +3296,8 @@ void ServerLobby::removeIPBanTable(const SocketAddress& addr)
 }   // removeIPBanTable
 
 //-----------------------------------------------------------------------------
-bool ServerLobby::handleAssets(const NetworkString& ns, STKPeer* peer)
+bool ServerLobby::handleAssets(const NetworkString& ns,
+        std::shared_ptr<STKPeer> peer)
 {
     std::set<std::string> client_karts, client_tracks;
     const unsigned kart_num = ns.getUInt16();
@@ -3562,6 +3427,10 @@ bool ServerLobby::handleAssets(const NetworkString& ns, STKPeer* peer)
         updateAddons();
         updateTracksForMode();
     }
+    const PeerEligibility old_el = peer->getEligibility();
+    peer->testEligibility();
+    // eligibility hooks
+    LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_el);
     return true;
 }   // handleAssets
 
@@ -3618,7 +3487,7 @@ void ServerLobby::connectionRequested(Event* event)
         caps.insert(cap);
     }
     event->getPeer()->setClientCapabilities(caps);
-    if (!handleAssets(data, event->getPeer()))
+    if (!handleAssets(data, event->getPeerSP()))
         return;
 
     unsigned player_count = data.getUInt8();
@@ -3777,13 +3646,28 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
         country_code = m_db->ipv62Country(peer->getAddress());
 #endif
 
+    int permlvl;
+    uint32_t restrictions;
+    std::string set_kart;
     auto red_blue = STKHost::get()->getAllPlayersTeamInfo();
+    if (ServerConfig::m_server_owner > 0 && 
+            online_id == ServerConfig::m_server_owner)
+    {
+        permlvl = std::numeric_limits<int>::max();
+    }
+    else
+    {
+        permlvl = loadPermissionLevelForOID(online_id);
+    }
+    peer->setPermissionLevel(permlvl);
+    auto restrictions_set_kart = loadRestrictionsForOID(online_id);
+    restrictions = std::get<0>(restrictions_set_kart);
+    set_kart = std::get<1>(restrictions_set_kart);
+    peer->setRestrictions(restrictions);
+
     for (unsigned i = 0; i < player_count; i++)
     {
         core::stringw name;
-        int permlvl;
-        uint32_t restrictions;
-        std::string set_kart;
         data.decodeStringW(&name);
         // 30 to make it consistent with stk-addons max user name length
         if (name.empty())
@@ -3792,19 +3676,6 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             name = name.subString(0, 30);
         float default_kart_color = data.getFloat();
         HandicapLevel handicap = (HandicapLevel)data.getUInt8();
-        if (ServerConfig::m_server_owner > 0 && 
-                online_id == ServerConfig::m_server_owner)
-        {
-            permlvl = std::numeric_limits<int>::max();
-        }
-        else
-        {
-            permlvl = loadPermissionLevelForOID(online_id);
-        }
-        auto restrictions_set_kart = loadRestrictionsForOID(online_id);
-        restrictions = std::get<0>(restrictions_set_kart);
-        set_kart = std::get<1>(restrictions_set_kart);
-
         if (restrictions & PRF_HANDICAP)
             handicap = HANDICAP_MEDIUM;
 
@@ -3813,15 +3684,15 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             online_name : name,
             peer->getHostId(), default_kart_color, i == 0 ? online_id : 0,
             handicap, (uint8_t)i, KART_TEAM_NONE,
-            country_code, permlvl, restrictions);
+            country_code);
 
         std::string utf8_online_name = StringUtils::wideToUtf8(online_name);
 
         if (!set_kart.empty())
             player->forceKart(set_kart);
 
-        if (player->hasRestriction(PRF_NOGAME) ||
-                player->getPermissionLevel() < PERM_PLAYER)
+        if (peer->hasRestriction(PRF_NOGAME) ||
+                peer->getPermissionLevel() < PERM_PLAYER)
         {
             player->setTeam(KART_TEAM_NONE);
         }
@@ -3877,7 +3748,7 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
 	    }
     }
 
-    if (!checkAllStandardContentInstalled(peer))
+    if (!checkAllStandardContentInstalled(peer.get()))
     {
 	    std::string player_name;
 	    if (!peer->getPlayerProfiles().empty())
@@ -3982,6 +3853,8 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
                 StringUtils::wideToUtf8(
                     peer->getPlayerProfiles()[0]->getName()).c_str(),
                 peer->getPlayerProfiles()[0]->getOnlineId());
+    ServerLobbyCommands::get()->onPeerJoin(this, peer);
+    LobbyPlayerQueue::get()->onPeerJoin(peer);
 #ifdef ENABLE_SQLITE3
     m_db->onPlayerJoinQueries(peer, online_id, player_count, country_code);
 #endif
@@ -4006,8 +3879,6 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
         if (profile->getPeer()->alwaysSpectate())
             all_profiles_size--;
     }
-
-    auto spectators_by_limit = getSpectatorsByLimit();
 
     // N - 1 AI
     auto ai_instance = m_ai_peer.lock();
@@ -4060,7 +3931,7 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
         .addUInt8((uint8_t)all_profiles.size());
     for (auto profile : all_profiles)
     {
-        bool is_spectator_by_limit = spectators_by_limit.find(profile->getPeer()) != spectators_by_limit.end();
+        const bool is_spectator_by_limit = LobbyPlayerQueue::get()->isSpectatorByLimit(profile->getPeer().get());
         auto profile_name = profile->getName();
         auto user_name = StringUtils::wideToUtf8(profile->getName());
 
@@ -4246,8 +4117,8 @@ void ServerLobby::handlePlayerVote(Event* event)
     if (isVotingOver())  return;
 
     // Check permissions, otherwise won't vote for anything
-    if (event->getPeer()->getPlayerProfiles()[0]->hasRestriction(PRF_TRACK)
-            || event->getPeer()->getPlayerProfiles()[0]->getPermissionLevel()
+    if (event->getPeer()->hasRestriction(PRF_TRACK)
+            || event->getPeer()->getPermissionLevel()
             < PERM_PLAYER)
         return;
 
@@ -4814,7 +4685,6 @@ void ServerLobby::configPeersStartTime()
     {
         std::string replay_path = ServerConfig::m_replay_dir;
         std::string replay_name = replay_path + "race_" + getTimeStamp() + ".replay";
-        //ReplayRecorder::get()->init();
         ReplayRecorder::get()->setFilename(replay_name);
         Log::info("ServerLobby", "Starting replay recording with filename: %s", replay_name.c_str());
     }
@@ -4836,9 +4706,7 @@ void ServerLobby::configPeersStartTime()
             const uint64_t cur_time = stk_host->getNetworkTimer();
             assert(start_time > cur_time);
             int sleep_time = (int)(start_time - cur_time);
-            //Log::info("ServerLobby", "Start game after %dms", sleep_time);
             StkTime::sleep(sleep_time);
-            //Log::info("ServerLobby", "Started at %lf", StkTime::getRealTime());
             m_state.store(RACING);
 	    const std::string game_start_message = ServerConfig::m_game_start_message;
 
@@ -5033,10 +4901,10 @@ void ServerLobby::testBannedForOnlineId(STKPeer* peer,
 }   // testBannedForOnlineId
 
 //-----------------------------------------------------------------------------
-void ServerLobby::listBanTable()
+void ServerLobby::listBanTable(std::stringstream& out)
 {
 #ifdef ENABLE_SQLITE3
-    m_db->listBanTable();
+    m_db->listBanTable(out);
 #endif
 }   // listBanTable
 
@@ -5223,7 +5091,7 @@ void ServerLobby::changeHandicap(Event* event)
     auto& player = event->getPeer()->getPlayerProfiles().at(local_id);
 
     // Check for restrictions
-    if (player->hasRestriction(PRF_HANDICAP))
+    if (event->getPeer()->hasRestriction(PRF_HANDICAP))
     {
         Log::info("ServerLobby",
                 "Player %s tried to change the handicap without permission.",
@@ -5688,6 +5556,7 @@ void ServerLobby::clientSelectingAssetsWantsToBackLobby(Event* event)
     sendCurrentModifiers(peer);
 }   // clientSelectingAssetsWantsToBackLobby
 
+#if 0
 std::set<std::shared_ptr<STKPeer>> ServerLobby::getSpectatorsByLimit()
 {
     std::set<std::shared_ptr<STKPeer>> spectators_by_limit;
@@ -5747,6 +5616,7 @@ std::set<std::shared_ptr<STKPeer>> ServerLobby::getSpectatorsByLimit()
     }
     return spectators_by_limit;
 }
+#endif
 
 //-----------------------------------------------------------------------------
 void ServerLobby::saveInitialItems(std::shared_ptr<NetworkItemManager> nim)
@@ -5832,13 +5702,7 @@ char ServerLobby::checkPeersCanPlayAndReady(bool ignore_ai_peer) const
         team = peer->getPlayerProfiles()[0]->getTeam();
         if (ignore_ai_peer && peer->isAIPeer())
             continue;
-        auto& player = peer->getPlayerProfiles()[0];
-        if (player->hasRestriction(PRF_NOGAME) ||
-                player->getPermissionLevel() < PERM_PLAYER)
-            continue;
-        if (!canRace(peer))
-            continue;
-        if (peer->alwaysSpectate())
+        if (!peer->isEligibleForGame())
             continue;
         else if(!is_team_game || is_team_game == (team != KART_TEAM_NONE))
             all_ready_play |= 2;
@@ -5854,17 +5718,19 @@ char ServerLobby::checkPeersCanPlayAndReady(bool ignore_ai_peer) const
 void ServerLobby::handleServerCommand(Event* event,
                                       std::shared_ptr<STKPeer> peer)
 {
-    SoccerWorld* sw = (SoccerWorld*)World::getWorld();
     NetworkString& data = event->data();
     std::string language;
     data.decodeString(&language);
     std::string cmd;
     data.decodeString(&cmd);
     auto argv = StringUtils::split(cmd, ' ');
-    bool noVeto = false;
     if (argv.size() == 0)
         return;
 
+    // Screw everything that's below, send the command line directly to the ServerLobbyCommands
+    ServerLobbyCommands::get()->handleServerCommand(this, peer, cmd);
+    return;
+#if 0
     std::shared_ptr<NetworkPlayerProfile> player = nullptr;
     if (peer->hasPlayerProfiles())
         player = peer->getPlayerProfiles()[0];
@@ -5898,71 +5764,6 @@ void ServerLobby::handleServerCommand(Event* event,
         // command is a number, /1 /2 /3 ... and pole is enabled
         submitPoleVote(peer, argv0_number);
     }
-    else if (argv[0] == "spectate" || argv[0] == "s" || argv[0] == "sp" || argv[0] == "spec" || argv[0] == "spect")
-    {
-        if (m_game_setup->isGrandPrix() || !ServerConfig::m_live_players)
-        {
-            std::string msg = "Server doesn't support spectate";
-	    sendStringToPeer(msg, peer);
-            return;
-        }
-
-        if (argv.size() != 2 || (argv[1] != "0" && argv[1] != "1") ||
-            m_state.load() != WAITING_FOR_START_GAME)
-        {
-            std::string msg = "Usage: spectate [0 or 1], before game started";
-	    sendStringToPeer(msg, peer);
-            return;
-        }
-
-        if (argv[1] == "1")
-        {
-            if (m_process_type == PT_CHILD &&
-                peer->getHostId() == m_client_server_host_id.load())
-            {
-                std::string msg = "Graphical client server cannot spectate";
-                sendStringToPeer(msg, peer);
-                return;
-            }
-            peer->setAlwaysSpectate(ASM_COMMAND);
-        }
-        else
-            peer->setAlwaysSpectate(ASM_NONE);
-        updatePlayerList();
-    }
-    else if (argv[0] == "addtime" || argv[0] == "addt")
-    {
-        std::string msg;
-        int amount_sec = 0;
-        
-        if (argv.size() < 2)
-        {
-            msg = "You need to specify the amount of seconds to add.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-        amount_sec = std::stoi(argv[1]);
-        if (amount_sec < 1 || (amount_sec > 3600 &&
-                    player->getPermissionLevel() < PERM_REFEREE))
-        {
-            msg = "Seconds should be between 1 and 3600.";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-
-        if ((noVeto || player->getVeto() < PERM_MODERATOR) && m_server_owner.lock() != peer)
-        {
-            if (!voteForCommand(peer,cmd)) return;
-        }
-        else if (m_server_owner.lock() != peer &&
-                player->getPermissionLevel() < 60) 
-        {
-            sendNoPermissionToPeer(peer.get(), argv);
-            return;
-        }
-        changeTimeout(amount_sec, false, false);
-	sendRandomInstalladdonLine(peer);
-    }
     else if (argv[0] == "score" || argv[0] == "sc")
     {
         if (m_state.load() != RACING)
@@ -5983,8 +5784,8 @@ void ServerLobby::handleServerCommand(Event* event,
     {
 
         std::string message;
-        if (player->hasRestriction(PRF_NOCHAT) ||
-                player->getPermissionLevel() <= PERM_NONE)
+        if (peer->hasRestriction(PRF_NOCHAT) ||
+                peer->getPermissionLevel() <= PERM_NONE)
 	{
 		message = "You are not allowed to chat, /teamchat command has no effect.";
 	}
@@ -6001,15 +5802,13 @@ void ServerLobby::handleServerCommand(Event* event,
         if (!peer->hasPlayerProfiles())
             return;
 
-        if (player->hasRestriction(PRF_NOPCHAT) ||
-                player->getPermissionLevel() <= PERM_NONE)
+        if (peer->hasRestriction(PRF_NOPCHAT) ||
+                peer->getPermissionLevel() <= PERM_NONE)
         {
 	    std::string message = "You are not allowed to send private messages.";
             sendStringToPeer(message, peer);
             return;
         }
-
-        const bool game_started = m_state.load() != WAITING_FOR_START_GAME;
 
         if (argv.size() == 1)
         {
@@ -6078,28 +5877,28 @@ void ServerLobby::handleServerCommand(Event* event,
             argv[0] = "slots"; 
             cmd = std::regex_replace(cmd,std::regex("sl"),"slots");
         }
-	if (argv.size() == 1 || argv[1] == "status")
-	{
-		int displayed_slots = m_max_players_in_game;
-		if (displayed_slots > 10)
-			displayed_slots = 10;
-		std::string msg = "Current slots: " + std::to_string(displayed_slots);
-		sendStringToPeer(msg, peer);
-		return;
-	}
-	if (argv[1].find('.') != std::string::npos || !std::all_of(argv[1].begin(), argv[1].end(), ::isdigit))
-	{
-		std::string msg = "Please use the command in the form /slots [number]";
-		sendStringToPeer(msg, peer);
-		return;
-	}
-	int limit = std::stoi(argv[1]);
-        if ((noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+        if (argv.size() == 1 || argv[1] == "status")
+        {
+            int displayed_slots = m_max_players_in_game;
+            if (displayed_slots > 10)
+                displayed_slots = 10;
+            std::string msg = "Current slots: " + std::to_string(displayed_slots);
+            sendStringToPeer(msg, peer);
+            return;
+        }
+        if (argv[1].find('.') != std::string::npos || !std::all_of(argv[1].begin(), argv[1].end(), ::isdigit))
+        {
+            std::string msg = "Please use the command in the form /slots [number]";
+            sendStringToPeer(msg, peer);
+            return;
+        }
+        int limit = std::stoi(argv[1]);
+        if ((noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                player->getPermissionLevel() < PERM_REFEREE) 
+                peer->getPermissionLevel() < PERM_REFEREE) 
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6107,14 +5906,14 @@ void ServerLobby::handleServerCommand(Event* event,
 
         const int max = std::min((int)ServerConfig::m_slots_max, m_max_players);
 
-        if (limit < ServerConfig::m_slots_min && player->getPermissionLevel() < PERM_ADMINISTRATOR)
+        if (limit < ServerConfig::m_slots_min && peer->getPermissionLevel() < PERM_ADMINISTRATOR)
         {
             std::string msg("The number of slots cannot be smaller than ");
             msg.append(std::to_string(ServerConfig::m_slots_min) + ".");
             sendStringToPeer(msg, peer);
             return;
         }
-        else if (limit > max && player->getPermissionLevel() < PERM_ADMINISTRATOR){
+        else if (limit > max && peer->getPermissionLevel() < PERM_ADMINISTRATOR){
             std::string msg("The number of slots cannot be larger than ");
             msg.append(std::to_string(max) + ".");
             sendStringToPeer(msg, peer);
@@ -6125,39 +5924,12 @@ void ServerLobby::handleServerCommand(Event* event,
             m_max_players_in_game = limit;
             setMaxPlayersInGame(limit, true);
         }
-    }
-#if 0
-    else if (argv[0] == "powerupper-on")
-    {
-	if (!(m_allow_powerupper)) return;
-	if (m_server_owner.lock() != peer)
-        {
-	    if (!voteForCommand(peer,cmd)) return;
-        }
-	m_powerupper_active = true;
-        std::string message = "The powerupper is now on.";
-        sendStringToAllPeers(message);
-    }
-
-    else if (argv[0] == "powerupper-off")
-    {
-	if (!(m_allow_powerupper)) return;
-	if (m_server_owner.lock() != peer)
-        {
-	    if (!voteForCommand(peer,cmd)) return;
-        }
-	m_powerupper_active = false;
-        std::string message = "The powerupper is now off.";
-        sendStringToAllPeers(message);
-    }
-#endif
-    
+    } // CHECK
     else if (argv[0] == "public" || argv[0] == "pub" || argv[0] == "all")
     {
         std::string s;
-        //m_message_receivers[peer.get()].clear();
-        if (player->hasRestriction(PRF_NOCHAT) ||
-                player->getPermissionLevel() <= PERM_NONE)
+        if (peer->hasRestriction(PRF_NOCHAT) ||
+                peer->getPermissionLevel() <= PERM_NONE)
         {
             s = "You are not allowed to chat, /public has no effect.";
         }
@@ -6167,11 +5939,11 @@ void ServerLobby::handleServerCommand(Event* event,
             s = "Your messages are now public";
         }
         sendStringToPeer(s, peer);
-    }
+    } // CHECK
 
     else if (argv[0] == "listserveraddon" || argv[0] == "lsa")
     {
-        if (player->getPermissionLevel() <= PERM_NONE)
+        if (peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6253,7 +6025,7 @@ void ServerLobby::handleServerCommand(Event* event,
     }
     else if (argv[0] == "playerhasaddon" || argv[0] == "pha")
     {
-        if (!player || player->getPermissionLevel() <= PERM_NONE)
+        if (peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6312,7 +6084,7 @@ void ServerLobby::handleServerCommand(Event* event,
         }
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (argv[0] == "kick")
     {
         if (argv.size() == 1)
@@ -6321,12 +6093,12 @@ void ServerLobby::handleServerCommand(Event* event,
             sendStringToPeer(msg, peer);
             return;
         }
-        if ((noVeto || player->getVeto() < PERM_MODERATOR) && m_server_owner.lock() != peer)
+        if ((noVeto || peer->getVeto() < PERM_MODERATOR) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_MODERATOR))
+                (peer->getPermissionLevel() < PERM_MODERATOR))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6334,7 +6106,7 @@ void ServerLobby::handleServerCommand(Event* event,
 
 	if (ServerConfig::m_soccer_roulette)
 	{
-		std::string msg = "Please ask a administrator to kick this person";
+		std::string msg = "Please ask an administrator to kick this person";
 		sendStringToPeer(msg, peer);
 		return;
 	}
@@ -6358,10 +6130,10 @@ void ServerLobby::handleServerCommand(Event* event,
         {
             player_peer->kick();
         }
-    }
+    } // CHECK
     else if (argv[0] == "playeraddonscore" || argv[0] == "pas")
     {
-        if (!player || player->getPermissionLevel() <= PERM_NONE)
+        if (peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6406,10 +6178,10 @@ void ServerLobby::handleServerCommand(Event* event,
         }
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (argv[0] == "serverhasaddon" || argv[0] == "sha")
     {
-        if (!player || player->getPermissionLevel() <= PERM_NONE)
+        if (peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6444,7 +6216,7 @@ void ServerLobby::handleServerCommand(Event* event,
         }
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (!ServerConfig::m_soccer_ranking_file.toString().empty() &&
             (argv[0] == "rank" || argv[0] == "rank10" || argv[0] == "top"))
     {
@@ -6534,12 +6306,12 @@ void ServerLobby::handleServerCommand(Event* event,
 	if (count == 0)
 		msg = "Rankings are currently unavailable.";
 	sendStringToPeer(msg, peer);
-    }
+    } // CHECK
     else if (!ServerConfig::m_feature_filepath.toString().empty() && 
             (argv[0] == "feature" || argv[0] == "inform" || argv[0] == "ifm" || argv[0] == "bug" || argv[0] == "suggest"))
     {
-        if (!player || player->hasRestriction(PRF_NOCHAT) ||
-                player->getPermissionLevel() <= PERM_NONE)
+        if (peer->hasRestriction(PRF_NOCHAT) ||
+                peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6606,12 +6378,12 @@ void ServerLobby::handleServerCommand(Event* event,
         chat->encodeString16(response);
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (!ServerConfig::m_reports_filepath.toString().empty() && 
             (argv[0] == "report" || argv[0] == "tell" || argv[0] == "rp"))
     {
-        if (!player || player->hasRestriction(PRF_NOCHAT) ||
-                player->getPermissionLevel() <= PERM_NONE)
+        if (peer->hasRestriction(PRF_NOCHAT) ||
+                peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6678,7 +6450,7 @@ void ServerLobby::handleServerCommand(Event* event,
         chat->encodeString16(response);
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (ServerConfig::m_allow_heavyparty && (argv[0] == "heavyparty" || argv[0] == "hp"))
     {
         irr::core::stringw response;
@@ -6709,12 +6481,12 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         if (!ServerConfig::m_tiers_roulette && 
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+                (noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6731,7 +6503,7 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         sendStringToAllPeers(message);
-    }
+    } // CHECK
     else if (ServerConfig::m_allow_mediumparty && (argv[0] == "mediumparty" || argv[0] == "mp"))
     {
         irr::core::stringw response;
@@ -6763,12 +6535,12 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         if (!ServerConfig::m_tiers_roulette &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+                (noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6817,12 +6589,12 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         if (!ServerConfig::m_tiers_roulette &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+                (noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6839,7 +6611,7 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         sendStringToAllPeers(message);	
-    }
+    } // CHECK
     else if (argv[0] == "bowlparty" || argv[0] == "bp")
     {
         irr::core::stringw response;
@@ -6872,12 +6644,12 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_bowlparty &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+                (noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -6930,12 +6702,12 @@ void ServerLobby::handleServerCommand(Event* event,
 				       return;
 			       }
 			        if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_bowlparty &&
-						(noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+						(noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
                     {
                         if (!voteForCommand(peer,cmd)) return;
                     }
                     else if (m_server_owner.lock() != peer &&
-                            (!player || player->getPermissionLevel() < PERM_REFEREE))
+                            (peer->getPermissionLevel() < PERM_REFEREE))
                     {
                         sendNoPermissionToPeer(peer.get(), argv);
                         return;
@@ -6967,7 +6739,7 @@ void ServerLobby::handleServerCommand(Event* event,
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
-    }
+    } // CHECK
     else if (argv[0] == "itemless" || argv[0] == "il")
     {
 	    if (argv[0] == "il")
@@ -7002,14 +6774,14 @@ void ServerLobby::handleServerCommand(Event* event,
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
-	    if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) &&
+	    if ((noVeto || (peer->getVeto() < PERM_REFEREE)) &&
 			    m_server_owner.lock() != peer)
 	    {
 		    if (!voteForCommand(peer, cmd))
 			    return;
 	    }
 	    else if (m_server_owner.lock() != peer &&
-			    (!player || player->getPermissionLevel() < PERM_REFEREE))
+			    (peer->getPermissionLevel() < PERM_REFEREE))
 	    {
 		    sendNoPermissionToPeer(peer.get(), argv);
 		    return;
@@ -7053,14 +6825,14 @@ void ServerLobby::handleServerCommand(Event* event,
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
-	    if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) &&
+	    if ((noVeto || (peer->getVeto() < PERM_REFEREE)) &&
 			    m_server_owner.lock() != peer)
 	    {
 		    if (!voteForCommand(peer, cmd))
 			    return;
 	    }
 	    else if (m_server_owner.lock() != peer &&
-			    (!player || player->getPermissionLevel() < PERM_REFEREE))
+			    (peer->getPermissionLevel() < PERM_REFEREE))
 	    {
 		    sendNoPermissionToPeer(peer.get(), argv);
 		    return;
@@ -7070,7 +6842,7 @@ void ServerLobby::handleServerCommand(Event* event,
 	    message += state ? "ACTIVE. No nitro can be used."
 		    : "INACTIVE. Nitro can be used as normal.";
 	    sendStringToAllPeers(message);
-    }
+    } // CHECK
 
     else if (argv[0] == "cakeparty" || argv[0] == "cp" || argv[0] == "cakefest")
     {
@@ -7109,12 +6881,12 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         if (!ServerConfig::m_tiers_roulette && ServerConfig::m_allow_cakeparty &&
-                (noVeto || player->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
+                (noVeto || peer->getVeto() < PERM_REFEREE) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -7139,11 +6911,11 @@ void ServerLobby::handleServerCommand(Event* event,
         }
 
         sendStringToAllPeers(message);
-    }
+    } // CHECK
     else if ((argv[0] == "scanservers" || argv[0] == "online" || argv[0] == "o")
             && ServerConfig::m_check_servers_cooldown > 0.0f)
     {
-        if (!player || player->getPermissionLevel() <= PERM_NONE)
+        if (peer->getPermissionLevel() <= PERM_NONE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -7169,7 +6941,7 @@ void ServerLobby::handleServerCommand(Event* event,
 	std::string msg = "Fetching, please wait...";
 	sendStringToPeer(msg, peer);
         return;
-    }
+    } // CHECK
     else if (argv[0] == "mute")
     {
         std::shared_ptr<STKPeer> player_peer;
@@ -7205,7 +6977,7 @@ mute_error:
         error->encodeString16(StringUtils::utf8ToWide(msg));
         peer->sendPacket(error, true/*reliable*/);
         delete error;
-    }
+    } // check
     else if (argv[0] == "unmute")
     {
         std::shared_ptr<STKPeer> player_peer;
@@ -7272,7 +7044,7 @@ unmute_error:
         }
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
-    }
+    } // CHECK
     else if (argv[0] == "showcommands" || argv[0] == "commands" || argv[0] == "cmds" || argv[0] == "cmd")
     {
 	    std::string msg = (
@@ -7287,7 +7059,7 @@ unmute_error:
         );
 	    sendStringToPeer(msg, peer);
         return;
-    }
+    } // CHECK
     else if (ServerConfig::m_allow_pole && (argv[0] == "pole"))
     {
         if (
@@ -7315,19 +7087,19 @@ unmute_error:
             return;
         }
 
-        if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+        if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
         }
 
         setPoleEnabled(state);
-    }
+    } // CHECK
     else if (ServerConfig::m_ishigami_enabled && (argv[0] == "stk-seen" || argv[0] == "seen"))
     {
         if (argv.size() < 2)
@@ -7394,7 +7166,7 @@ unmute_error:
 			sendStringToPeer(error_msg, peer);
 		}
 	}).detach();
-    }
+    } // CHECK (conditionally)
     else if (argv[0] == "date" || argv[0] == "time")
     {
 	   const std::unordered_map<std::string, double> TZ_OFFSETS = {
@@ -7500,7 +7272,7 @@ unmute_error:
 		   for (const auto& pair : TZ_OFFSETS) {
 			   valid_tz += pair.first + ", ";
 		   }
-		   //remove ending comma and space
+		   // remove ending comma and space
 		   if (!valid_tz.empty()) {
 			   valid_tz.erase(valid_tz.size() - 2);
 		   }
@@ -7514,7 +7286,7 @@ unmute_error:
     // MODERATION TOOLKIT
     else if (argv[0] == "veto")
     {
-        if (!player || player->getPermissionLevel() < 50)
+        if (peer->getPermissionLevel() < 50)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -7522,19 +7294,19 @@ unmute_error:
         if (argv.size() < 2)
         {
             std::string msg = "Current veto status: " + 
-		    std::string(player->getVeto() > 0 ? "ON" : "OFF") +
+		    std::string(peer->getVeto() > 0 ? "ON" : "OFF") +
 		    "\nUse 'veto on' or 'veto off' to change.";
             sendStringToPeer(msg, peer);
         }
         if (argv[1] == "on")
         {
-            player->setVeto(player->getPermissionLevel());
+            peer->setVeto(peer->getPermissionLevel());
             std::string msg = "Forcing votable commands is now enabled.";
             sendStringToPeer(msg, peer);
         }
         else
         {
-            player->setVeto(0);
+            peer->setVeto(0);
             std::string msg = "Votable commands are no longer forced.";
             sendStringToPeer(msg, peer);
         }
@@ -7567,27 +7339,27 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-        else if (is_singleslot_not_sbl && player->getPermissionLevel() >= PERM_PLAYER &&
-                player->notRestrictedBy(PRF_NOGAME))
+        else if (is_singleslot_not_sbl && peer->getPermissionLevel() >= PERM_PLAYER &&
+                peer->notRestrictedBy(PRF_NOGAME))
         {
             // Immediately start the game
             startSelection();
             return;
         }
-        if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+        if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
         }
 
         startSelection();
-    }
-    else if (argv[0] == "help") //help commands
+    } // CHECK
+    else if (argv[0] == "help") // help commands
     {
         if (argv.size() > 2) return;  
     
@@ -7665,7 +7437,7 @@ unmute_error:
        }
       else if (argv[1] == "referee")
     {
-        if (m_server_owner.lock() != peer && (!player || player->getPermissionLevel() > 50))
+        if (m_server_owner.lock() != peer && (peer->getPermissionLevel() > 50))
         {
             std::string msg = "/game X Y : Starts game number X with Y minutes. - /setkart kart-id player : Give players a particular kart (punishment or balance). - /lobby : To make players go to lobby. - /yellow P R : Gives a yellow card to player P with reason R. - /referee and /video : Update the match details on wiki.";
             sendStringToPeer(msg, peer);
@@ -7711,7 +7483,7 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-    }
+    } // CHECK
     else if (argv[0] == "website")
     {
         if (argv.size() > 2) return;
@@ -7723,7 +7495,7 @@ unmute_error:
             sendStringToPeer(msg, peer);
         } 
         return;
-    }
+    } // TODO: CustomTextCommandBase
     else if (argv[0] == "discord")
     {
 	if (argv.size() > 2) return;
@@ -7735,7 +7507,7 @@ unmute_error:
 		sendStringToPeer(msg, peer);
 	}
 	return;
-    }
+    } // TODO: CustomTextCommandBase
     else if (argv[0] == "tracks")
     {
 	    if (argv.size() > 2) return;
@@ -7799,12 +7571,12 @@ unmute_error:
 		     sendStringToPeer(response, peer);
 		     return;
 	     }
-	     if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+	     if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
 	     {
 		     if (!voteForCommand(peer, cmd)) return;
 	     }
 	     else if (m_server_owner.lock() != peer &&
-			     (!player || player->getPermissionLevel() < PERM_REFEREE))
+			     (peer->getPermissionLevel() < PERM_REFEREE))
 	     {
 		     sendNoPermissionToPeer(peer.get(), argv);
 		     return;
@@ -7847,12 +7619,12 @@ unmute_error:
 		    argv[0] = "resetball";
 		    cmd = std::regex_replace(cmd, std::regex("rb"), "resetball");
 	    }
-       	    if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+       	    if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
             {
 		    if (!voteForCommand(peer,cmd)) return;
        	    }
             else if (m_server_owner.lock() != peer &&
-			    (!player || player->getPermissionLevel() < PERM_REFEREE))
+			    (peer->getPermissionLevel() < PERM_REFEREE))
 	    {
 		    sendNoPermissionToPeer(peer.get(), argv);
            	    return;
@@ -7941,12 +7713,12 @@ unmute_error:
 		    sendStringToPeer(msg, peer);
 		    return;
 	    }
-        if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+        if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8096,7 +7868,7 @@ unmute_error:
 		    GoalHistory::showTeamGoalHistory(peer, 1);
 	    }
 	    return;
-    }
+    } // CHECK
     else if (argv[0] == "a")
     {
 	    if (m_state.load() == WAITING_FOR_START_GAME)
@@ -8136,12 +7908,12 @@ unmute_error:
             return;
         }
 
-        if ((noVeto || (player && player->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
+        if ((noVeto || (peer->getVeto() < PERM_REFEREE)) && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         else if (m_server_owner.lock() != peer &&
-                (!player || player->getPermissionLevel() < PERM_REFEREE))
+                (peer->getPermissionLevel() < PERM_REFEREE))
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8173,11 +7945,11 @@ unmute_error:
             peer->sendPacket(ns, true/*reliable*/);
 
         delete ns;
-    }
+    } // CHECK
     else if (argv[0] == "ban")
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_MODERATOR)
+        if (peer->getPermissionLevel() < PERM_MODERATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8212,7 +7984,7 @@ unmute_error:
         // get target
         int32_t trg_permlvl = loadPermissionLevelForUsername(
             StringUtils::utf8ToWide(argv[1]));
-        int32_t sender_permlvl = player->getPermissionLevel();
+        int32_t sender_permlvl = peer->getPermissionLevel();
         Log::verbose("ServerLobby", "sender_permlvl = %d, trg_permlvl = %d",
                 sender_permlvl, trg_permlvl);
 
@@ -8243,7 +8015,7 @@ unmute_error:
     else if (argv[0] == "unban" || argv[0] == "pardon")
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_MODERATOR)
+        if (peer->getPermissionLevel() < PERM_MODERATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8271,11 +8043,11 @@ unmute_error:
             msg = "Failed to unban the player, check the network console.";
             sendStringToPeer(msg, peer);
         }
-    }
+    } // CHECK
     else if (argv[0] == "restrict" || argv[0] == "punish")
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_MODERATOR)
+        if (peer->getPermissionLevel() < PERM_MODERATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8309,7 +8081,7 @@ unmute_error:
         uint32_t _rv = std::get<0>(target_rv_k);
 	std::string _k = std::get<1>(target_rv_k);
 
-        if ((player->getPermissionLevel() < target_permlvl) &&
+        if ((peer->getPermissionLevel() < target_permlvl) &&
                 ServerConfig::m_server_owner > 0 &&
                 ServerConfig::m_server_owner != player->getOnlineId())
         {
@@ -8322,14 +8094,14 @@ unmute_error:
         {
             auto& targetPlayer = target->getPlayerProfiles()[0];
             if (argv[1] == "off" && argv[2] == "all")
-                targetPlayer->clearRestrictions();
+                target->clearRestrictions();
             else if (state)
-                targetPlayer->addRestriction(restriction);
+                target->addRestriction(restriction);
             else
-                targetPlayer->removeRestriction(restriction);
+                target->removeRestriction(restriction);
             writeRestrictionsForUsername(
                     targetPlayer->getName(),
-                    targetPlayer->getRestrictions(), _k);
+                    target->getRestrictions(), _k);
             msg = StringUtils::insertValues(
                     "Set %s to %s for player %s.",
                     getRestrictionName(restriction),
@@ -8358,7 +8130,7 @@ unmute_error:
             msg = "Invalid target player: " + argv[2];
             sendStringToPeer(msg, peer);
         }
-    }
+    } // CHECK
     else if (argv[0] == "nospec" ||
              argv[0] == "nogame" ||
              argv[0] == "nochat" ||
@@ -8367,7 +8139,7 @@ unmute_error:
              )
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_MODERATOR)
+        if (peer->getPermissionLevel() < PERM_MODERATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8400,7 +8172,7 @@ unmute_error:
                 StringUtils::utf8ToWide(argv[2])
                 );
         target_r = std::get<0>(target_rv_k);
-        if ((player->getPermissionLevel() < target_permlvl) &&
+        if ((peer->getPermissionLevel() < target_permlvl) &&
                 ServerConfig::m_server_owner > 0 &&
                 ServerConfig::m_server_owner != player->getOnlineId())
         {
@@ -8413,12 +8185,12 @@ unmute_error:
         {
             auto& targetPlayer = target->getPlayerProfiles()[0];
             if (state)
-                targetPlayer->addRestriction(restriction);
+                target->addRestriction(restriction);
             else
-                targetPlayer->removeRestriction(restriction);
+                target->removeRestriction(restriction);
             writeRestrictionsForUsername(
                     targetPlayer->getName(),
-                    targetPlayer->getRestrictions());
+                    target->getRestrictions());
             msg = StringUtils::insertValues(
                     "Set %s to %s for player %s.",
                     getRestrictionName(restriction),
@@ -8447,11 +8219,11 @@ unmute_error:
             msg = "Invalid target player: " + argv[2];
             sendStringToPeer(msg, peer);
         }
-    }
+    } // CHECK
     else if (argv[0] == "setteam")
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_MODERATOR)
+        if (peer->getPermissionLevel() < PERM_MODERATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8488,12 +8260,12 @@ unmute_error:
 
         msg = "Player team has been updated.";
         sendStringToPeer(msg, peer);
-    }
+    } // CHECK
     else if (argv[0] == "setkart")
     {
         std::string msg;
         auto spectators_by_limit = getSpectatorsByLimit();
-        if (ServerConfig::m_command_kart_mode && (!player || player->getPermissionLevel() < 
+        if (ServerConfig::m_command_kart_mode && (peer->getPermissionLevel() < 
                 PERM_PLAYER))
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8507,7 +8279,7 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-        else if (!player || (!ServerConfig::m_command_kart_mode && player->getPermissionLevel() < 
+        else if ((!ServerConfig::m_command_kart_mode && peer->getPermissionLevel() < 
                 PERM_MODERATOR))
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8519,7 +8291,7 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-        const bool canSpecifyExtra = player->getPermissionLevel() >= PERM_MODERATOR;
+        const bool canSpecifyExtra = peer->getPermissionLevel() >= PERM_MODERATOR;
         const KartProperties* kart =
             kart_properties_manager->getKart(argv[1]);
         if ((!kart || kart->isAddon()) && argv[1] != "off")
@@ -8587,7 +8359,7 @@ unmute_error:
         if (ServerConfig::m_command_track_mode)
         {
             auto spectators_by_limit = getSpectatorsByLimit();
-            if (!player || player->getPermissionLevel() < PERM_PLAYER)
+            if (peer->getPermissionLevel() < PERM_PLAYER)
             {
                 sendNoPermissionToPeer(peer.get(), argv);
                 return;
@@ -8602,13 +8374,13 @@ unmute_error:
         }
         else
         {
-            if (!player || player->getPermissionLevel() < PERM_REFEREE)
+            if (peer->getPermissionLevel() < PERM_REFEREE)
             {
                 sendNoPermissionToPeer(peer.get(), argv);
                 return;
             }
         }
-        const bool canSpecifyExtra = player->getPermissionLevel() >= PERM_REFEREE;
+        const bool canSpecifyExtra = peer->getPermissionLevel() >= PERM_REFEREE;
         bool isField = (argv[0] == "setfield");
 
         if (argv.size() < 2)
@@ -8632,7 +8404,7 @@ unmute_error:
         if (argv.size() >= 4 && argv[3] == "on")
             specvalue = true;
         // Check that peer and server have the track
-        bool found = forceSetTrack(soccer_field_id, laps, specvalue, isField, true);
+        bool found = setForcedTrack(soccer_field_id, laps, specvalue, isField, true);
         if (!found)
         {
             std::string msg = isField ? "Soccer field \'" + soccer_field_id + "\' does not exist or is not installed." :
@@ -8640,11 +8412,11 @@ unmute_error:
             sendStringToPeer(msg, peer);
             return;
         }
-    }
+    } // CHECK
     else if (argv[0] == "sethandicap")
     {
         std::string msg;
-        if (!player || player->getPermissionLevel() < PERM_REFEREE)
+        if (peer->getPermissionLevel() < PERM_REFEREE)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8673,17 +8445,17 @@ unmute_error:
             return;
         }
 
-        std::shared_ptr<NetworkPlayerProfile> player = nullptr;
-        auto peer = STKHost::get()->findPeerByName(
-                StringUtils::utf8ToWide(argv[2]), true, true, &player);
-        if (!player || !peer || !peer->hasPlayerProfiles())
+        std::shared_ptr<NetworkPlayerProfile> t_player = nullptr;
+        auto t_peer = STKHost::get()->findPeerByName(
+                StringUtils::utf8ToWide(argv[2]), true, true, &t_player);
+        if (!t_player || !t_peer || !peer->hasPlayerProfiles())
         {
             msg = "Invalid target player: " + argv[2];
             sendStringToPeer(msg, peer);
             return;
         }
         
-        player->setHandicap(handicap);
+        t_player->setHandicap(handicap);
         updatePlayerList();
 
         msg = "Player handicap has been updated.";
@@ -8726,13 +8498,13 @@ unmute_error:
             return;
         }
 
-        if ((noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
+        if ((noVeto || (peer->getVeto() < PERM_ADMINISTRATOR))
                 && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         // owner can give away its status, otherwise voted
-        else if (player->getPermissionLevel() < PERM_ADMINISTRATOR &&
+        else if (peer->getPermissionLevel() < PERM_ADMINISTRATOR &&
             m_server_owner.lock() != peer)
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8761,13 +8533,13 @@ unmute_error:
             return;
         }
 
-        if (ServerConfig::m_server_configurable && (noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
+        if (ServerConfig::m_server_configurable && (noVeto || (peer->getVeto() < PERM_ADMINISTRATOR))
                 && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         // owner can give away its status, otherwise voted
-        else if (player->getPermissionLevel() < PERM_ADMINISTRATOR &&
+        else if (peer->getPermissionLevel() < PERM_ADMINISTRATOR &&
             m_server_owner.lock() != peer)
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8815,13 +8587,13 @@ unmute_error:
             return;
         }
 
-        if (ServerConfig::m_server_configurable && (noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
+        if (ServerConfig::m_server_configurable && (noVeto || (peer->getVeto() < PERM_ADMINISTRATOR))
                 && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         // owner can give away its status, otherwise voted
-        else if (player->getPermissionLevel() < PERM_ADMINISTRATOR &&
+        else if (peer->getPermissionLevel() < PERM_ADMINISTRATOR &&
             m_server_owner.lock() != peer)
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8844,7 +8616,7 @@ unmute_error:
                 RaceManager::get()->getDifficulty());
         msg += ".";
         sendStringToPeer(msg, peer);
-    }
+    } // CHECK
     else if (argv[0] == "setgoaltarget")
     {
         std::string msg;
@@ -8859,13 +8631,13 @@ unmute_error:
             return;
         }
 
-        if (ServerConfig::m_server_configurable && (noVeto || (player && player->getVeto() < PERM_ADMINISTRATOR))
+        if (ServerConfig::m_server_configurable && (noVeto || (peer->getVeto() < PERM_ADMINISTRATOR))
                 && m_server_owner.lock() != peer)
         {
             if (!voteForCommand(peer,cmd)) return;
         }
         // owner can give away its status, otherwise voted
-        else if (player->getPermissionLevel() < PERM_ADMINISTRATOR &&
+        else if (peer->getPermissionLevel() < PERM_ADMINISTRATOR &&
             m_server_owner.lock() != peer)
         {
             sendNoPermissionToPeer(peer.get(), argv);
@@ -8880,13 +8652,13 @@ unmute_error:
         msg += state ? "on." : "off.";
 
         sendStringToPeer(msg, peer);
-    }
+    } // CHECK
     // (CHEATS) Not gonna be used in game.
     else if (!ServerConfig::m_ranked &&
         (argv[0] == "hackitem" || argv[0] == "hki"))
     {
         // admin only
-        if (player->getPermissionLevel() < PERM_ADMINISTRATOR)
+        if (peer->getPermissionLevel() < PERM_ADMINISTRATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -8983,7 +8755,7 @@ unmute_error:
         (argv[0] == "hacknitro" || argv[0] == "hkn"))
     {
         // can only use it during the game
-        if (player->getPermissionLevel() < PERM_ADMINISTRATOR)
+        if (peer->getPermissionLevel() < PERM_ADMINISTRATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -9070,12 +8842,12 @@ unmute_error:
             }
         }
 
-    }
+    } // CHECK
     // CHEATS (gonna be used in game for training server)
     else if (ServerConfig::m_cheats &&
         (argv[0] == "item" || argv[0] == "i"))
     {
-        if (player->getPermissionLevel() < PERM_PRISONER)
+        if (peer->getPermissionLevel() < PERM_PRISONER)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -9146,11 +8918,11 @@ unmute_error:
                 argv[1].c_str(), type, quantity, 
                 StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()).c_str());
         }
-    }
+    } // CHECK
     else if (ServerConfig::m_cheats &&
         (argv[0] == "nitro" || argv[0] == "n"))
     {
-        if (player->getPermissionLevel() < PERM_PRISONER)
+        if (peer->getPermissionLevel() < PERM_PRISONER)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -9218,7 +8990,7 @@ unmute_error:
                 quantity, 
                 StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()).c_str());
         }
-    }
+    } // CHECK
     else if (argv[0] == "infinite")
     {
     	if (argv.size() < 2 || (argv[1] != "on" && argv[1] != "off") )
@@ -9228,7 +9000,7 @@ unmute_error:
             return;
         }
 
-        if (player->getPermissionLevel() < PERM_ADMINISTRATOR)
+        if (peer->getPermissionLevel() < PERM_ADMINISTRATOR)
         {
             sendNoPermissionToPeer(peer.get(), argv);
             return;
@@ -9236,10 +9008,10 @@ unmute_error:
 
         bool state = argv[1] == "on";
         RaceManager::get()->setInfiniteMode(state);
-    }
+    } // CHECK
     else if (argv[0] == "soccerroulette" || argv[0] == "sr")
     {
-	    if (!player || player->getPermissionLevel() < PERM_REFEREE)
+	    if (peer->getPermissionLevel() < PERM_REFEREE)
 	    {
 		    sendNoPermissionToPeer(peer.get(), argv);
 		    return;
@@ -9305,9 +9077,8 @@ unmute_error:
 	    }
 	    else if (argv[1] == "start")
 	    {
-		    //SoccerRoulette::get()->setRouletteTimeout(peer);
 		    std::string next_field = SoccerRoulette::get()->getNextField();
-		    bool success = forceSetTrack(next_field, 10, false, true, true);
+		    bool success = setForcedTrack(next_field, 10, false, true, true);
 		    std::string msg;
 		    if (success)
 		    {
@@ -9348,6 +9119,7 @@ unmute_error:
         msg += cmd;
         sendStringToPeer(msg, peer);
     }
+#endif
 }   // handleServerCommand
 
 //-----------------------------------------------------------------------------
@@ -9367,33 +9139,23 @@ bool ServerLobby::serverAndPeerHaveTrack(STKPeer* peer, std::string track_id) co
     return peerHasTrack && serverHasTrack;
 } // serverAndPeerHaveTrack
 //-----------------------------------------------------------------------------
-bool ServerLobby::canRace(std::shared_ptr<STKPeer>& peer) const
+bool ServerLobby::peerHasForcedTrack(std::shared_ptr<STKPeer>& peer) const
 {
-    return canRace(peer.get());
-}   // canRace
+    return peerHasForcedTrack(peer.get());
+}   // peerHasForcedTrack
 //-----------------------------------------------------------------------------
-bool ServerLobby::canRace(STKPeer* peer) const
+bool ServerLobby::peerHasForcedTrack(STKPeer* const peer) const
 {
-  if (peer == NULL || peer->getPlayerProfiles().size() == 0) return false;
-  std::string username = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
-  const auto& kt = peer->getClientAssets();
+    if (!peer) return false;
+    const auto& kt = peer->getClientAssets();
 
-  // Players who do not have the addon defined via /setfield are not allowed to play.
-  if (!m_set_field.empty())
-  {
-      bool has_addon = false;
-      for (auto& track : kt.second)
-      {
-          if (track == m_set_field)
-          {
-              has_addon = true;
-              break;
-          }
-      }
-      if (has_addon == false) return false;
-    }
+    // Players who do not have the addon defined via /setfield are not allowed to play.
+    if (!m_set_field.empty())
+        return kt.second.find(m_set_field) != kt.second.cend();
+
+    // nothing is forced otherwise
     return true;
-}   // canRace
+}   // peerHasForcedTrack
 
 //-----------------------------------------------------------------------------
 void ServerLobby::sendStringToPeer(const std::string& s, std::shared_ptr<STKPeer>& peer) const
@@ -9425,9 +9187,39 @@ void ServerLobby::sendStringToPeer(const irr::core::stringw& s, std::shared_ptr<
     peer->sendPacket(chat, true/*reliable*/);
     delete chat;
 }   // sendStringToPeer
+//-----------------------------------------------------------------------------
+void ServerLobby::sendStringToPeer(const std::string& s, STKPeer* const peer) const
+{
+    if (peer==NULL)
+    {
+        Log::info("ServerLobby",s.c_str());
+        return;
+    }
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    chat->encodeString16(StringUtils::utf8ToWide(s));
+    peer->sendPacket(chat, true/*reliable*/);
+    delete chat;
+}   // sendStringToPeer
+//-----------------------------------------------------------------------------
+void ServerLobby::sendStringToPeer(const irr::core::stringw& s, STKPeer* const peer) const
+{
+    if (peer==NULL)
+    {
+        Log::info("ServerLobby",StringUtils::wideToUtf8(s).c_str());
+        return;
+    }
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    chat->encodeString16(s);
+    peer->sendPacket(chat, true/*reliable*/);
+    delete chat;
+}   // sendStringToPeer
 
 //-----------------------------------------------------------------------------
-void ServerLobby::sendStringToAllPeers(std::string& s)
+void ServerLobby::sendStringToAllPeers(const std::string s)
 {
     Log::info("ServerLobby",s.c_str());
     NetworkString* chat = getNetworkString();
@@ -9438,6 +9230,10 @@ void ServerLobby::sendStringToAllPeers(std::string& s)
     delete chat;
 }   // sendStringToAllPeers
 
+// return false - the vote has been submitted, but not passed.
+// return true - the last vote has been successfully passed, the command takes action
+// by the name of the latest executor.
+#if 0
 bool ServerLobby::voteForCommand(std::shared_ptr<STKPeer>& peer, std::string command)
 {
     if (!ServerConfig::m_command_voting) return false;
@@ -9472,6 +9268,7 @@ bool ServerLobby::voteForCommand(std::shared_ptr<STKPeer>& peer, std::string com
 
     return false;
 } // voteForCommand
+#endif
 //-----------------------------------------------------------------------------
 // Specify default argument to determine current mode from server config
 const std::string ServerLobby::getRandomAddon(RaceManager::MinorRaceModeType m) const
@@ -9593,19 +9390,7 @@ void ServerLobby::setPoleEnabled(bool mode)
     else 
     {
         // delete command votes for "pole on"
-#if 0
-        for (auto& voter : m_command_voters) {
-            auto cmd_i = std::find(voter.second.begin(), voter.second.end(),
-                    item);
-            if (cmd_i == voter.second.end())
-                // nothing to erase, no vote.
-                continue;
-
-            voter.second.erase(cmd_i);
-        }
-#endif
-        m_command_voters["pole on"].clear();
-        m_command_voters["pole off"].clear();
+        ServerLobbyCommands::get()->resetCommandVotesFor("pole");
         std::string resp("Pole has been disabled.");
 	if (!ServerConfig::m_soccer_roulette)
 	{
@@ -9792,6 +9577,31 @@ void ServerLobby::announcePoleFor(std::shared_ptr<NetworkPlayerProfile>& pole, c
             }, msg);
     
     delete msg;
+}  // announcePoleFor
+
+void ServerLobby::setRandomKartsEnabled(const bool state, const bool announce)
+{
+    m_random_karts_enabled = state;
+    std::string msg = "Random karts have been ";
+
+    if (state)
+    {
+        assignRandomKarts();
+        if (announce)
+        {
+            msg += "activated.";
+            sendStringToAllPeers(msg);
+        }
+    }
+    else
+    {
+        resetKartSelections();
+        if (announce)
+        {
+            msg += "deactivated.";
+            sendStringToAllPeers(msg);
+        }
+    }
 }
 
 NetworkString* ServerLobby::addRandomInstalladdonMessage(NetworkString* const ril_pkt) const
@@ -9805,7 +9615,6 @@ NetworkString* ServerLobby::addRandomInstalladdonMessage(NetworkString* const ri
 
     ril_pkt->addUInt8(LE_CHAT);
     ril_pkt->encodeString16(StringUtils::utf8ToWide(msg));
-    //peer->sendPacket(ril_pkt, true*reliable*);
     return ril_pkt;
 }
 //-----------------------------------------------------------------------------
@@ -10062,17 +9871,6 @@ int ServerLobby::loadPermissionLevelForUsername(const core::stringw& name)
     return PERM_PLAYER;
 #endif
 }
-void ServerLobby::setMaxPlayersInGame(const int value, const bool notify)
-{
-    m_max_players_in_game = value;
-    updatePlayerList();
-    if (notify)
-    {
-        std::string message = "The number of slots have been changed to " + std::to_string(m_max_players_in_game)+".";
-        sendStringToAllPeers(message);
-    }
-}
-
 
 std::string ServerLobby::get_elo_change_string()
 {
@@ -10094,7 +9892,6 @@ std::string ServerLobby::get_elo_change_string()
             result += player + " " + elo_change + "\n";
         }
     }
-    //result.pop_back();
     return result;
 }
 
@@ -10135,7 +9932,7 @@ std::pair<std::vector<std::string>, std::vector<std::string>> ServerLobby::creat
     return std::pair<std::vector<std::string>, std::vector<std::string>>(red_team, blue_team);
 }
 
-void ServerLobby::soccer_ranked_make_teams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec)
+void ServerLobby::soccerRankedMakeTeams(std::pair<std::vector<std::string>, std::vector<std::string>> teams, int min, std::vector <std::pair<std::string, int>> player_vec)
 {
     auto peers2 = STKHost::get()->getPeers();
     int random = rand() % 2;
@@ -10228,27 +10025,15 @@ void ServerLobby::changeTimeout(long timeout, bool infinite, bool absolute)
     {
 	    sendStringToAllPeers(msg);
     }
+
+    delete server_info;
 }
 //-----------------------------------------------------------------------------
-bool ServerLobby::forceSetTrack(std::string track_id,
+bool ServerLobby::setForcedTrack(std::string track_id,
         int laps,
         bool specvalue, const bool is_soccer, const bool announce)
 {
         bool found = false;
-#if 0
-        if (peer!=NULL)
-        {
-            std::shared_ptr<STKPeer> player_peer = STKHost::get()->findPeerByName(StringUtils::utf8ToWide(peer_username));
-            found = serverAndPeerHaveTrack(player_peer, soccer_field_id) || soccer_field_id == "all";
-            if (!found)
-            {    
-                found = serverAndPeerHaveTrack(player_peer, "addon_" + soccer_field_id);
-                if (found) soccer_field_id = "addon_" + soccer_field_id;
-            }
-        }
-        else
-        {
-#endif
         PeerVote fv;
 
         auto peers = STKHost::get()->getPeers();
@@ -10267,19 +10052,9 @@ bool ServerLobby::forceSetTrack(std::string track_id,
             else break;
         }
         if (track_id == "all") found = true;
-#if 0
-        }
-#endif
 
         if (found)
         {
-#if 0
-            if (m_max_players_in_game > 10 && !(soccer_field_id == "addon_antarticy" || soccer_field_id == "addon_huge"))
-            {
-                m_max_players_in_game = ServerConfig::m_slots_max;
-                updatePlayerList();
-            }
-#endif
             if (track_id == "all")
             {
                 m_set_field = "";
@@ -10297,7 +10072,7 @@ bool ServerLobby::forceSetTrack(std::string track_id,
                     return false;
                 if (laps < 1)
                 {
-			laps = t->getDefaultNumberOfLaps();
+                    laps = t->getDefaultNumberOfLaps();
                 }
                 m_set_field = track_id;
                 m_set_laps = laps;
@@ -10305,13 +10080,13 @@ bool ServerLobby::forceSetTrack(std::string track_id,
                 m_set_specvalue = specvalue;
                 std::string msg = is_soccer ? "Next played soccer field will be " + track_id + "." :
                     "Next played track will be " + track_id + ".";
-		if (!ServerConfig::m_soccer_roulette)
-		{
-                	// Send message to the lobby
-           	        sendStringToAllPeers(msg);
-                        std::string msg2 = "setfield " + track_id;
-                        Log::info("ServerLobby", msg2.c_str());
-		}
+                if (!ServerConfig::m_soccer_roulette)
+                {
+                    // Send message to the lobby
+                    sendStringToAllPeers(msg);
+                    std::string msg2 = "setfield " + track_id;
+                    Log::info("ServerLobby", msg2.c_str());
+                }
             }
             return true;
         }
@@ -10434,12 +10209,14 @@ std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username)
     return std::make_pair(std::numeric_limits<unsigned int>::max(), 0);
 }
 //=========================================================================
-// Checks if a player has all required standard tracks installed (except for allowed exceptions)
-bool ServerLobby::checkAllStandardContentInstalled(std::shared_ptr<STKPeer> peer)
+// Checks if a player has all required standard tracks installed
+// (except for allowed exceptions)
+bool ServerLobby::checkAllStandardContentInstalled(STKPeer* peer) const
 {
     const auto& client_assets = peer->getClientAssets();
     std::vector<std::string> missing_tracks;
-    std::set<std::string> allowed_missing_tracks = {"hole_drop", "oasis"};
+    // TODO: separate ServerConfig entry
+    const std::set<std::string> allowed_missing_tracks = {"hole_drop", "oasis"};
     const std::vector<std::string>& all_track_ids = track_manager->getAllTrackIdentifiers();   
     for (const std::string& track_id : all_track_ids)
     {
@@ -10470,8 +10247,7 @@ void ServerLobby::checkSoccerRoulette()
     {
         std::string next_field = SoccerRoulette::get()->getNextField();
         Log::info("ServerLobby", "Soccer Roulette: Setting next field to %s", next_field.c_str());
-        forceSetTrack(next_field, 10, false, true, true);
-	//setPoleEnabled(true);
+        setForcedTrack(next_field, 10, false, true, true);
     }
 }
 // check if this person has won the most recent soccer roulette event
@@ -10507,7 +10283,7 @@ void ServerLobby::startTeamSelectionVote()
     // timer
     m_team_selection_vote_timer = StkTime::getMonoTimeMs() + 60000;
 }
-void ServerLobby::handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const std::string& vote)
+void ServerLobby::handleTeamSelectionVote(STKPeer* const peer, const bool select_option_a)
 {
     if (!m_team_selection_vote_active)
     {
@@ -10521,14 +10297,14 @@ void ServerLobby::handleTeamSelectionVote(std::shared_ptr<STKPeer> peer, const s
         sendStringToPeer(msg, peer);
         return;
     }
-    if (vote == "a")
+    if (select_option_a)
     {
         m_team_selection_votes_a++;
         m_team_selection_voted_peers.insert(peer->getHostId());
         std::string msg = "You voted for Team Option A.";
         sendStringToPeer(msg, peer);
     }
-    else if (vote == "b")
+    else
     {
         m_team_selection_votes_b++;
         m_team_selection_voted_peers.insert(peer->getHostId());
@@ -10564,11 +10340,11 @@ void ServerLobby::applyTeamSelection(bool select_option_a)
 {
     if (select_option_a)
     {
-        soccer_ranked_make_teams(m_team_option_a, m_min_player_idx, m_player_vec);
+        soccerRankedMakeTeams(m_team_option_a, m_min_player_idx, m_player_vec);
     }
     else
     {
-        soccer_ranked_make_teams(m_team_option_b, m_min_player_idx, m_player_vec);
+        soccerRankedMakeTeams(m_team_option_b, m_min_player_idx, m_player_vec);
     }
     updatePlayerList();
 }
@@ -10623,186 +10399,6 @@ std::pair<std::vector<std::string>, std::vector<std::string>> ServerLobby::creat
     }
     return std::make_pair(red_team, blue_team);
 }
-void ServerLobby::handleRPSCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args)
-{
-    if (args.size() < 2)
-    {
-        std::string msg = "Usage: /rps [playername] or /rps [r/p/s] or /rps accept";
-        sendStringToPeer(msg, peer);
-        return;
-    }
-
-    uint32_t peer_id = peer->getHostId();
-    std::string player_name;
-
-    for (auto& player : peer->getPlayerProfiles())
-    {
-        player_name = StringUtils::wideToUtf8(player->getName());
-        break;
-    }
-
-    std::string arg_lower = args[1];
-    std::transform(arg_lower.begin(), arg_lower.end(), arg_lower.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-
-    if (arg_lower == "accept" || arg_lower == "a")
-    {
-        for (auto& challenge : m_rps_challenges)
-        {
-            if (challenge.challenged_id == peer_id && !challenge.accepted)
-            {
-                challenge.accepted = true;
-                challenge.timeout = StkTime::getMonoTimeMs() + 20000; // 20 seconds to choose
-
-                std::shared_ptr<STKPeer> challenger_peer = NULL;
-                for (auto& p : STKHost::get()->getPeers())
-                {
-                    if (p->getHostId() == challenge.challenger_id)
-                    {
-                        challenger_peer = p;
-                        break;
-                    }
-                }
-
-                if (challenger_peer)
-                {
-                    std::string msg = player_name + " accepted your Rock Paper Scissors challenge! You have 10 seconds to choose /rps rock (r), /rps paper (p), or /rps scissors (s).";
-                    sendStringToPeer(msg, challenger_peer);
-                }
-
-                std::string msg = "You accepted the Rock Paper Scissors challenge from " + challenge.challenger_name + "! You have 10 seconds to choose /rps rock (r), /rps paper (p), or /rps scissors (s).";
-                sendStringToPeer(msg, peer);
-                return;
-            }
-        }
-
-        std::string msg = "You don't have any pending Rock Paper Scissors challenges.";
-        sendStringToPeer(msg, peer);
-        return;
-    }
-
-    // Handle full names and abbreviations
-    std::string choice = "";
-    if (arg_lower == "rock" || arg_lower == "r")
-        choice = "rock";
-    else if (arg_lower == "paper" || arg_lower == "p")
-        choice = "paper";
-    else if (arg_lower == "scissors" || arg_lower == "s")
-        choice = "scissors";
-
-    if (!choice.empty())
-    {
-        for (auto& challenge : m_rps_challenges)
-        {
-            if (challenge.accepted)
-            {
-                if (challenge.challenger_id == peer_id && challenge.challenger_choice.empty())
-                {
-                    challenge.challenger_choice = choice;
-                    std::string msg = "You chose " + choice + "! Waiting for your opponent...";
-                    sendStringToPeer(msg, peer);
-
-                    if (!challenge.challenged_choice.empty())
-                    {
-                        determineRPSWinner(challenge);
-                    }
-                    return;
-                }
-                else if (challenge.challenged_id == peer_id && challenge.challenged_choice.empty())
-                {
-                    challenge.challenged_choice = choice;
-                    std::string msg = "You chose " + choice + "! Waiting for your opponent...";
-                    sendStringToPeer(msg, peer);
-
-                    if (!challenge.challenger_choice.empty())
-                    {
-                        determineRPSWinner(challenge);
-                    }
-                    return;
-                }
-            }
-        }
-
-        std::string msg = "You don't have any active Rock Paper Scissors games.";
-        sendStringToPeer(msg, peer);
-        return;
-    }
-
-    // Handle /rps [playername] - challenge a player
-    std::string target_name = args[1];
-    std::shared_ptr<STKPeer> target_peer = NULL;
-    uint32_t target_id = 0;
-    bool found = false;
-
-    // Case-insensitive player name search
-    for (auto& p : STKHost::get()->getPeers())
-    {
-        for (auto& player_profile : p->getPlayerProfiles())
-        {
-            std::string name = StringUtils::wideToUtf8(player_profile->getName());
-            std::string name_lower = name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
-                          [](unsigned char c){ return std::tolower(c); });
-
-            std::string target_lower = target_name;
-            std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(),
-                          [](unsigned char c){ return std::tolower(c); });
-
-            if (name_lower == target_lower)
-            {
-                target_peer = p;
-                target_id = p->getHostId();
-                target_name = name; // Use the actual name with proper case
-                found = true;
-                break;
-            }
-        }
-        if (found) break;
-    }
-
-    if (!found || !target_peer)
-    {
-        std::string msg = "Player " + target_name + " not found.";
-        sendStringToPeer(msg, peer);
-        return;
-    }
-
-    if (target_id == peer_id)
-    {
-        std::string msg = "You can't challenge yourself!";
-        sendStringToPeer(msg, peer);
-        return;
-    }
-
-    for (auto& challenge : m_rps_challenges)
-    {
-        if ((challenge.challenger_id == peer_id && challenge.challenged_id == target_id) ||
-            (challenge.challenger_id == target_id && challenge.challenged_id == peer_id))
-        {
-            std::string msg = "There's already a Rock Paper Scissors challenge between you and " + target_name + ".";
-            sendStringToPeer(msg, peer);
-            return;
-        }
-    }
-
-    RPSChallenge challenge;
-    challenge.challenger_id = peer_id;
-    challenge.challenged_id = target_id;
-    challenge.challenger_name = player_name;
-    challenge.challenged_name = target_name;
-    challenge.challenger_choice = "";
-    challenge.challenged_choice = "";
-    challenge.timeout = StkTime::getMonoTimeMs() + 40000; // 40 seconds to accept
-    challenge.accepted = false;
-
-    m_rps_challenges.push_back(challenge);
-
-    std::string msg = "You challenged " + target_name + " to Rock Paper Scissors!";
-    sendStringToPeer(msg, peer);
-
-    msg = player_name + " challenged you to Rock Paper Scissors! Type /rps accept to play.";
-    sendStringToPeer(msg, target_peer);
-}
 void ServerLobby::checkRPSTimeouts()
 {
     uint64_t current_time = StkTime::getMonoTimeMs();
@@ -10830,7 +10426,7 @@ void ServerLobby::checkRPSTimeouts()
                 }   
                 it = m_rps_challenges.erase(it);
             }
-            else if (it->challenger_choice.empty() && it->challenged_choice.empty())
+            else if (it->challenger_choice == RPS_NONE && it->challenged_choice == RPS_NONE)
             {
                 std::string msg = "Rock Paper Scissors game timed out. Neither player made a choice.";
                 if (challenger_peer)
@@ -10839,7 +10435,7 @@ void ServerLobby::checkRPSTimeouts()
                     sendStringToPeer(msg, challenged_peer);   
                 it = m_rps_challenges.erase(it);
             }
-            else if (it->challenger_choice.empty())
+            else if (it->challenger_choice == RPS_NONE)
             {
                 if (challenged_peer)
                 {
@@ -10853,7 +10449,7 @@ void ServerLobby::checkRPSTimeouts()
                 }   
                 it = m_rps_challenges.erase(it);
             }
-            else if (it->challenged_choice.empty())
+            else if (it->challenged_choice == RPS_NONE)
             {
                 if (challenger_peer)
                 {
@@ -10892,9 +10488,15 @@ void ServerLobby::determineRPSWinner(RPSChallenge& challenge)
         if (challenger_peer && challenged_peer)
             break;
     }
+    STKPeer* winner_peer;
+    STKPeer* loser_peer;
+
     if (challenge.challenger_choice == challenge.challenged_choice)
     {
-        std::string result = "It's a tie! Both players chose " + challenge.challenger_choice + ".";
+        winner_peer = nullptr;
+        loser_peer = nullptr;
+        std::string result = "It's a tie! Both players chose " +
+            RockPaperScissors::rpsToString(challenge.challenger_choice) + ".";
         
         if (challenger_peer)
             sendStringToPeer(result, challenger_peer);
@@ -10902,45 +10504,43 @@ void ServerLobby::determineRPSWinner(RPSChallenge& challenge)
         if (challenged_peer)
             sendStringToPeer(result, challenged_peer);
     }
-    else if ((challenge.challenger_choice == "rock" && challenge.challenged_choice == "scissors") ||
-             (challenge.challenger_choice == "paper" && challenge.challenged_choice == "rock") ||
-             (challenge.challenger_choice == "scissors" && challenge.challenged_choice == "paper"))
+    else if (RockPaperScissors::wins(
+                challenge.challenger_choice, challenge.challenged_choice))
     {
-        if (challenger_peer)
-        {
-            std::string result = "You win! You chose " + challenge.challenger_choice + " and " + 
-                                challenge.challenged_name + " chose " + challenge.challenged_choice + ".";
-            sendStringToPeer(result, challenger_peer);
-        }
-        if (challenged_peer)
-        {
-            std::string result = "You lose! You chose " + challenge.challenged_choice + " and " + 
-                                challenge.challenger_name + " chose " + challenge.challenger_choice + ".";
-            sendStringToPeer(result, challenged_peer);
-        }
+        winner_peer = challenger_peer.get();
+        loser_peer = challenged_peer.get();
     }
     else
     {
-        if (challenger_peer)
-        {
-            std::string result = "You lose! You chose " + challenge.challenger_choice + " and " + 
-                                challenge.challenged_name + " chose " + challenge.challenged_choice + ".";
-            sendStringToPeer(result, challenger_peer);
-        }   
-        if (challenged_peer)
-        {
-            std::string result = "You win! You chose " + challenge.challenged_choice + " and " + 
-                                challenge.challenger_name + " chose " + challenge.challenger_choice + ".";
-            sendStringToPeer(result, challenged_peer);
-        }
+        winner_peer = challenged_peer.get();
+        loser_peer = challenger_peer.get();
     }
-    for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end(); ++it)
+    if (winner_peer)
+    {
+        std::string result = "You won! You chose " +
+            RockPaperScissors::rpsToString(challenge.challenger_choice) + " and " + 
+            challenge.challenged_name + " chose " +
+            RockPaperScissors::rpsToString(challenge.challenged_choice) + ".";
+        sendStringToPeer(result, winner_peer);
+    }
+    if (loser_peer)
+    {
+        std::string result =
+            "You lost! You chose " +
+            RockPaperScissors::rpsToString(challenge.challenged_choice) + " and " + 
+            challenge.challenger_name + " chose " +
+            RockPaperScissors::rpsToString(challenge.challenger_choice) + ".";
+        sendStringToPeer(result, loser_peer);
+    }
+    for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end();)
     {
         if (it->challenger_id == challenge.challenger_id && it->challenged_id == challenge.challenged_id)
         {
-            m_rps_challenges.erase(it);
+            it = m_rps_challenges.erase(it);
             break;
         }
+        else
+            it++;
     }
 }
 // -- 
@@ -11068,50 +10668,4 @@ void ServerLobby::endJumbleForPlayer(uint32_t player_id, bool won)
     m_jumble_player_words.erase(player_id);
     m_jumble_player_jumbled.erase(player_id);
     m_jumble_player_start_time.erase(player_id);
-}
-
-void ServerLobby::handleJumbleCommand(std::shared_ptr<STKPeer> peer, const std::vector<std::string>& args)
-{
-    uint32_t peer_id = peer->getHostId();
-    std::string player_name;
-    for (auto& player : peer->getPlayerProfiles())
-    {
-        player_name = StringUtils::wideToUtf8(player->getName());
-        break;
-    }
-    std::lock_guard<std::mutex> lock(m_jumble_mutex);
-    if (args.size() < 2)
-    {
-        auto it_jumbled = m_jumble_player_jumbled.find(peer_id);
-        if (it_jumbled != m_jumble_player_jumbled.end())
-        {
-            std::string msg = "Current word to unscramble: " + it_jumbled->second;
-            sendStringToPeer(msg, peer);
-        }
-        else
-        {
-            startJumbleForPlayer(peer_id);
-        }
-        return;
-    }
-    std::string guess = args[1];
-    std::transform(guess.begin(), guess.end(), guess.begin(),
-                  [](unsigned char c){ return std::tolower(c); });
-    auto it_word = m_jumble_player_words.find(peer_id);
-    if (it_word != m_jumble_player_words.end())
-    {
-        if (guess == it_word->second)
-        {
-            endJumbleForPlayer(peer_id, true);
-        }
-        else
-        {
-            std::string msg = "Sorry, '" + guess + "' is not correct. Try again!";
-            sendStringToPeer(msg, peer);
-        }
-    }
-    else
-    {
-        startJumbleForPlayer(peer_id);
-    }
 }

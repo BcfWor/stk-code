@@ -1,3 +1,7 @@
 [submodule "lib/nnwcli"]
 	path = lib/nnwcli
 	url = https://github.com/NobWow/nnwcli
+[submodule "lib/json"]
+	path = lib/json
+	url = https://github.com/nlohmann/json
+	branch = master

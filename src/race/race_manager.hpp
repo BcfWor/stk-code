@@ -389,8 +389,6 @@ private:
     bool m_scheduled_benchmark;
 
 public:
-    void setItemlessMode(bool enabled) { m_itemless_mode = enabled; }
-    bool getItemlessMode() const { return m_itemless_mode; }
     void setNitrolessMode(bool enabled) { m_nitroless_mode = enabled; }
     bool getNitrolessMode() const { return m_nitroless_mode; }
     // ----------------------------------------------------------------------------------------

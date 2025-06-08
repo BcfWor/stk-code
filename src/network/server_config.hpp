@@ -97,6 +97,10 @@ namespace ServerConfig
         SERVER_CFG_DEFAULT(IntServerConfigParam(
                     -1, "fixed-lap-count","fixed-lap-count"));
 
+    SERVER_CFG_PREFIX StringServerConfigParam m_customtext_commands
+       SERVER_CFG_DEFAULT(StringServerConfigParam("customtext.json", "customtext-commands",
+       "File containing JSON data for registering customtext commands. Reloadable with /customtext-reload"));
+
     SERVER_CFG_PREFIX BoolServerConfigParam m_soccer_roulette
        SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "soccer-roulette",
        "Enable soccer roulette to automatically rotate between soccer fields"));
@@ -196,6 +200,10 @@ namespace ServerConfig
     SERVER_CFG_PREFIX BoolServerConfigParam m_allow_cakeparty
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-cakeparty",
         "Allow cake party command."));
+
+    SERVER_CFG_PREFIX BoolServerConfigParam m_allow_itemless
+        SERVER_CFG_DEFAULT(BoolServerConfigParam(true, "allow-itemless",
+        "Allow itemless command."));
 
     SERVER_CFG_PREFIX BoolServerConfigParam m_allow_pole
         SERVER_CFG_DEFAULT(BoolServerConfigParam(false, "allow-pole",
