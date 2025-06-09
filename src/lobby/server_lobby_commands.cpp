@@ -174,6 +174,7 @@ void ServerLobbyCommands::registerCommands()
     m_executor.register_command(std::make_shared<SpectateCommand>());
     m_executor.add_alias("spec", "spectate");
     m_executor.add_alias("sp", "spectate");
+    m_executor.add_alias("s", "spectate");
     m_executor.register_command(std::make_shared<QuitCommand>());
     // Sample
     // m_executor.register_command(std::make_shared<SampleCommand>());
@@ -773,9 +774,6 @@ void ServerLobbyCommands::dispatchVotedCommand(ServerLobby* const lobby, std::sh
     ctx->set_lobby(lobby);
     ctx->set_command(cmd->get_name(), cmd);
     ctx->set_parser(args);
-
-    std::string msg = StringUtils::insertValues("Most voted command: \"%s %s\". Executing...", cmd->get_name(), argline);
-    lobby->sendStringToAllPeers(msg);
 
     // run the command as network console
 

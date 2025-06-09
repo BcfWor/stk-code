@@ -174,7 +174,7 @@ bool AutoteamsVariantVoteCommand::execute(nnwcli::CommandExecutorContext* const 
 
     if (peer)
     {
-        lobby->handleTeamSelectionVote(peer, m_variant_one ? "a" : "b");
+        lobby->handleTeamSelectionVote(peer, m_variant_one);
     }
     return true;
 }
