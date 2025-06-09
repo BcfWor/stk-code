@@ -34,8 +34,6 @@ bool ReportCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* con
     std::string message;
     parser->parse_full(message);
 
-    parser->parse_finish(); // Do not allow more arguments
-
     CMD_REQUIRE_PERM(stk_ctx, m_required_perm);
 
     if (stk_ctx->hasRestriction(PRF_NOCHAT))

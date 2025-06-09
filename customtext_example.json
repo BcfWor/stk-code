@@ -1,0 +1,7 @@
+{
+    "custom_command": {
+        "desc": "Shows information about something",
+        "aliases": ["ccomm", "cmd123"],
+        "text": "Hello world! This is the response when the command is run. You can write anything here, and if the text gets too long, it will always paginate it."
+    }
+}

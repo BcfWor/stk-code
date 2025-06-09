@@ -127,6 +127,8 @@ bool ServerLobbyCommands::VoteEntry::operator<(const VoteEntry& other) const
     const std::string& other_cmd_name = other.m_voted_command->get_name();
     if (this_cmd_name == other_cmd_name)
     {
+        if (m_voted_argline == other.m_voted_argline)
+            return false;
         return m_voted_argline < other.m_voted_argline;
     }
     return this_cmd_name < other_cmd_name;
@@ -312,6 +314,7 @@ void ServerLobbyCommands::registerCommands()
     m_executor.add_alias("sr", "soccerroulette");
     m_executor.register_command(std::make_shared<ChaosPartyCommand>());
     m_executor.register_command(std::make_shared<BroadcastCommand>());
+    m_executor.add_alias("bc", "broadcast");
     m_executor.register_command(std::make_shared<ListPeersCommand>());
     m_executor.register_command(std::make_shared<SpeedStatsCommand>());
     // Permission rank manipulation commands
@@ -645,7 +648,7 @@ void ServerLobbyCommands::submitVote(ServerLobby* const lobby, const std::string
     {
         // already exists, adding extra voter into the list, if possible
         auto username_iterator = entry_iterator->second.find(username);
-        if (username_iterator == entry_iterator->second.cend())
+        if (username_iterator != entry_iterator->second.cend())
         {
             // this command has already been voted by the same player
             ctx->write("You already voted for that command.");
@@ -658,11 +661,22 @@ void ServerLobbyCommands::submitVote(ServerLobby* const lobby, const std::string
 
     const unsigned int min_required = STKHost::get()->getPeerCount() / 2 + 1;
 
-    std::string msg = StringUtils::insertValues("%s voted for command \"%s %s\" (%d out of %d votes)", username.c_str(),
-            entry.m_voted_command->get_name().c_str(),
-            entry.m_voted_argline.c_str(),
-            entry_iterator->second.size(),
-            min_required);
+    std::string msg;
+    if (entry.m_voted_argline.empty())
+    {
+        msg = StringUtils::insertValues("%s voted for command \"/%s\" (%d out of %d votes)", username.c_str(),
+                entry.m_voted_command->get_name().c_str(),
+                entry_iterator->second.size(),
+                min_required);
+    }
+    else
+    {
+        msg = StringUtils::insertValues("%s voted for command \"/%s %s\" (%d out of %d votes)", username.c_str(),
+                entry.m_voted_command->get_name().c_str(),
+                entry.m_voted_argline.c_str(),
+                entry_iterator->second.size(),
+                min_required);
+    }
 
     lobby->sendStringToAllPeers(msg);
 
@@ -744,9 +758,10 @@ void ServerLobbyCommands::applyVoteIfPresent(ServerLobby* lobby)
                 vote->first.m_voted_argline);
         // Erase the command
         vote = m_command_votes.erase(vote);
+        // reset voting
+        m_command_votes.clear();
+        break;
     }
-    // reset voting
-    m_command_votes.clear();
 }
 void ServerLobbyCommands::dispatchVotedCommand(ServerLobby* const lobby, std::shared_ptr<nnwcli::Command> cmd, std::shared_ptr<nnwcli::AbstractParser> args, const std::string argline)
 {

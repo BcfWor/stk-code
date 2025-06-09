@@ -47,7 +47,7 @@ bool ListPeersCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
     }
     for (unsigned int i = 0; i < peers.size(); i++)
     {
-        ctx->nprintf("%u: %s %s %s\n", peers[i]->getHostId(),
+        ctx->nprintf("%u: %s %s %s\n", 512, peers[i]->getHostId(),
             peers[i]->getAddress().toString().c_str(),
             StringUtils::wideToUtf8(peers[i]->getPlayerProfiles()[0]->getName()).c_str(),
             peers[i]->getUserVersion().c_str());

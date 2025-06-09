@@ -60,7 +60,7 @@ bool HackitemCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* c
     CMD_REQUIRE_PERM(stk_ctx, m_required_perm);
 
     // only during the game
-    if (lobby->isRacing())
+    if (!lobby->isRacing())
     {
         ctx->write("The game is not running.");
         ctx->flush();
@@ -159,7 +159,7 @@ bool HacknitroCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
 
     auto parser = ctx->get_parser();
 
-    unsigned char quantity;
+    float quantity;
     std::string playername;
 
     *parser >> quantity;
@@ -172,7 +172,7 @@ bool HacknitroCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
     CMD_REQUIRE_PERM(stk_ctx, m_required_perm);
 
     // only during the game
-    if (lobby->isRacing())
+    if (!lobby->isRacing())
     {
         ctx->write("The game is not running.");
         ctx->flush();
@@ -222,7 +222,7 @@ bool HacknitroCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
     else if (k_ids.size() > 1)
     {
         Log::warn("ServerLobby", "hacknitro: Player %s has multiple kart IDs.", 
-                StringUtils::wideToUtf8(target_peer->getPlayerProfiles()[0]->getName()).c_str());
+                stk_ctx->getProfileName().c_str());
     }
     unsigned int a = *k_ids.begin();
     target = w->getKart(a);

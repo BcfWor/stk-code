@@ -57,6 +57,7 @@ void LobbyPlayerQueue::onPeerJoin(std::shared_ptr<STKPeer>& peer)
     if (peer->isEligibleForGame())
     {
         m_peer_queue.push_back(peer);
+        Log::verbose(LOGNAME, "Peer %d added into the queue.", peer->getHostId());
     }
     else {
         Log::verbose(LOGNAME, "Peer %d is not eligible for the queue.", peer->getHostId());
@@ -77,7 +78,9 @@ void LobbyPlayerQueue::onPeerLeave(STKPeer* peer)
 
     // remove the peer from the queue
     m_peer_queue.erase(int_peer.first);
+    Log::verbose(LOGNAME, "Peer %d removed from the queue.", peer->getHostId());
 
+    clearAllExpiredPeers();
     updateCachedSpectators();
 }
 void LobbyPlayerQueue::clearAllExpiredPeers()
@@ -101,10 +104,12 @@ void LobbyPlayerQueue::onPeerEligibilityChange(std::shared_ptr<STKPeer> const pe
         const PeerEligibility old_value)
 {
     const PeerEligibility eligibility = peer->getEligibility();
+    const bool old_eligible = old_value == PELG_YES;
+    const bool new_eligible = eligibility == PELG_YES;
     // hook whenever the eligibility factors change
-    if (old_value != eligibility)
+    if (old_eligible != new_eligible)
     {
-        if (peer->isEligibleForGame())
+        if (new_eligible)
         {
             // add the player to the queue (assume it hasn't been added before)
             m_peer_queue.push_back(peer);
@@ -119,6 +124,8 @@ void LobbyPlayerQueue::onPeerEligibilityChange(std::shared_ptr<STKPeer> const pe
                 m_peer_queue.erase(peer_it.first);
                 Log::verbose(LOGNAME, "Peer %d removed from the queue.", peer->getHostId());
             }
+            else
+                Log::verbose(LOGNAME, "Peer %d hasn't been found in the queue.", peer->getHostId());
         }
         updateCachedSpectators();
         return;
@@ -173,9 +180,6 @@ bool LobbyPlayerQueue::isSpectatorByLimit(std::shared_ptr<STKPeer>& peer) const
 std::pair<LobbyPlayerQueue::PeerQueue::const_iterator, unsigned int>
     LobbyPlayerQueue::findPeer(STKPeer* const peer, const bool rev)
 {
-    if (!peer->isEligibleForGame())
-        return std::make_pair(m_peer_queue.cend(), 0);
-
     // linear search
 
     if (rev)
@@ -226,14 +230,14 @@ void LobbyPlayerQueue::updateCachedSpectators()
     m_cache_spectators_by_limit.clear();
 
     unsigned int profile_counter = 0;
-    auto it = m_peer_queue.crbegin();
+    auto it = m_peer_queue.cbegin();
     // iterating from the head of the queue, the players that are on the front
     // have their profile size summed up.
-    for (; profile_counter < m_max_players_in_game && it != m_peer_queue.crend();
+    for (; profile_counter < m_max_players_in_game && it != m_peer_queue.cend();
             it++)
     {
         auto peer = it->lock();
-        if (!peer->hasPlayerProfiles())
+        if (!peer || !peer->hasPlayerProfiles())
             continue;
         
         const std::size_t player_count = peer->getPlayerProfiles().size();
@@ -241,13 +245,18 @@ void LobbyPlayerQueue::updateCachedSpectators()
             break;
         profile_counter += player_count;
     }
-    if (it == m_peer_queue.crend())
+    if (it == m_peer_queue.cend())
         // No players in the queue are exceeding the limit
         return;
 
-    for (; it != m_peer_queue.crend(); it++)
+    for (; it != m_peer_queue.cend(); it++)
     {
         // the rest of the queue are the players that are under limit
         m_cache_spectators_by_limit.insert(it->lock().get());
     }
+
+    Log::verbose(LOGNAME, "%d peers are spectating by limit.", m_cache_spectators_by_limit.size());
+    auto lobby = LobbyProtocol::get<ServerLobby>();
+    if (lobby)
+        lobby->updatePlayerList();
 }

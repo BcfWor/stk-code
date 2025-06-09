@@ -45,7 +45,7 @@ bool SetModeCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
     bool goaltarget;
 
     *parser >> modename; 
-    *parser >> goaltarget;
+    parser->parse_bool(goaltarget, false);
 
     parser->parse_finish();
 

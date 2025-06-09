@@ -73,6 +73,8 @@ bool setPermCommand(
     if (peer)
     {
         peer->setPermissionLevel(lvl);
+        if (peer->getVeto() > lvl)
+            peer->setVeto(PERM_PLAYER);
     }
     if (!oid)
     {

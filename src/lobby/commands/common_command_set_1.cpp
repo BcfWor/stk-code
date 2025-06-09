@@ -77,7 +77,7 @@ bool SpectateCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* c
         return false;
     }
     
-    if (state != peer->alwaysSpectate())
+    if (state == peer->alwaysSpectate())
     {
         ctx->write("You're already ");
         if (!state) ctx->write("not ");
@@ -286,10 +286,10 @@ bool BroadcastCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
     auto parser = ctx->get_parser();
     std::string message;
     parser->parse_full(message, true);
-    parser->parse_finish();
 
     ServerLobby* const lobby = stk_ctx->get_lobby();
 
+    CMD_REQUIRE_PERM(stk_ctx, m_required_perm);
     if (message.empty())
     {
         ctx->write("No message to broadcast.");
@@ -308,7 +308,7 @@ bool SpeedStatsCommand::execute(nnwcli::CommandExecutorContext* const ctx, void*
     STKHost* const host = STKHost::get();
 
     CMD_REQUIRE_PERM(stk_ctx, m_required_perm);
-    ctx->nprintf("Upload speed (KBps): %f\tDownload speed (KBps): ", 512,
+    ctx->nprintf("Upload speed (KBps): %f   Download speed (KBps): %f", 512,
         (float)host->getUploadSpeed() / 1024.0f,
         (float)host->getDownloadSpeed() / 1024.0f);
     ctx->flush();

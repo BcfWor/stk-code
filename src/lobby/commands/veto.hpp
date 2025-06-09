@@ -25,7 +25,7 @@
 
 class VetoCommand : public STKCommand
 {
-    ServerPermissionLevel m_required_perm = PERM_REFEREE;
+    ServerPermissionLevel m_required_perm = PERM_MODERATOR;
 public:
     VetoCommand() : STKCommand(false)
     {

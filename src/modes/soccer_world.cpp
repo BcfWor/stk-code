@@ -414,7 +414,7 @@ void SoccerWorld::onGo()
     if (ServerConfig::m_soccer_log)
     {
 	    LiveSoccer::getInstance()->startExport();
-            LiveSoccer::getInstance()->resetGame();
+        LiveSoccer::getInstance()->resetGame();
     }
 }   // onGo
 
@@ -429,6 +429,10 @@ void SoccerWorld::terminateRace()
         m_karts[i]->finishedRace(0.0f, true/*from_server*/);
     }   // i<kart_amount
     tellCountIfDiffers();
+    if (ServerConfig::m_soccer_log)
+    {
+	    LiveSoccer::getInstance()->stopExport();
+    }
     WorldWithRank::terminateRace();
 } // terminateRace
 
@@ -721,7 +725,7 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 			    LiveSoccer::getInstance()->updateGoal(player_name_log, team_number,
 					    			getScore(KART_TEAM_RED),
 								getScore(KART_TEAM_BLUE),
-								match_time);
+								m_time);
 		    }
 	   }
 	}
@@ -736,7 +740,7 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 			    LiveSoccer::getInstance()->updateGoal(player_name_log, team_number,
 					    			getScore(KART_TEAM_RED),
 								getScore(KART_TEAM_BLUE),
-								match_time);
+								m_time);
 		    }
 	    }
 	}

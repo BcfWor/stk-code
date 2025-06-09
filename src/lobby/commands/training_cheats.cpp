@@ -187,7 +187,7 @@ bool NitroCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* cons
         // report to the log
         Log::info("ServerLobby", "NITRO %f for %s",
             quantity, 
-            StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()).c_str());
+            stk_ctx->getProfileName().c_str());
     }
     return true;
 }

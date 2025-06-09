@@ -1471,7 +1471,8 @@ void ServerLobby::asynchronousUpdate()
                     [&](STKPeer* peer)
                     {
                         const auto tracks = peer->getClientAssets().second;
-                        return peer->getPermissionLevel() >= PERM_SPECTATOR &&
+                        return !peer->isWaitingForGame() &&
+                            peer->getPermissionLevel() >= PERM_SPECTATOR &&
                             peer->notRestrictedBy(PRF_NOSPEC) &&
                             tracks.find(winner_vote.m_track_name) != tracks.cend();
                     }, load_world_message);
@@ -2525,7 +2526,10 @@ void ServerLobby::startSelection(const Event *event)
         // This will also allow a correct number of in game players for max
         // arena players handling
         for (STKPeer* peer : always_spectate_peers)
+        {
+            peer->setAlwaysSpectate(ASM_FULL);
             peer->setWaitingForGame(true);
+        }
     }
 
     unsigned max_player = 0;
@@ -2571,11 +2575,8 @@ void ServerLobby::startSelection(const Event *event)
 
     for (auto peer : peers)
     {
-        const PeerEligibility old_eligibility = peer->getEligibility();
-        const PeerEligibility new_eligibility = peer->testEligibility();
-        LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_eligibility);
         // update eligibility of all peers except the one who pressed the button
-        if ((!event || peer != event->getPeerSP()) && new_eligibility != PELG_YES)
+        if ((!event || peer != event->getPeerSP()) && !peer->isEligibleForGame())
         {
             peer->setWaitingForGame(true);
             if (peer->getPermissionLevel() >= PERM_SPECTATOR &&

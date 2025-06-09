@@ -42,12 +42,6 @@ bool NitrolessCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
 
     parser->parse_finish(); // Do not allow more arguments
 
-    if (ServerConfig::m_soccer_log && stk_ctx->getPermissionLevel() < PERM_ADMINISTRATOR)
-    {
-        ctx->write("You can only use this command on unranked TierS servers");
-        ctx->flush();
-        return false;
-    }
     ServerLobby* const lobby = stk_ctx->get_lobby();
     if (!lobby) return false;
     if (lobby->getCurrentState() != ServerLobby::WAITING_FOR_START_GAME)
@@ -64,9 +58,21 @@ bool NitrolessCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* 
         ctx->flush();
         return false;
     }
-    CMD_VOTABLE(data, true);
-
-    CMD_SELFVOTE_PERMLOWER_CROWN(stk_ctx, data, m_min_veto, parser);
+    if (ServerConfig::m_soccer_log && stk_ctx->getPermissionLevel() < PERM_ADMINISTRATOR)
+    {
+        ctx->write("You can only use this command on unranked TierS servers");
+        ctx->flush();
+        return false;
+    }
+    else if (ServerConfig::m_soccer_log)
+    {
+        CMD_REQUIRE_PERM(stk_ctx, PERM_ADMINISTRATOR);
+    }
+    else
+    {
+        CMD_VOTABLE(data, true);
+        CMD_SELFVOTE_PERMLOWER_CROWN(stk_ctx, data, m_min_veto, parser);
+    }
 
     rm->setNitrolessMode(state);
 

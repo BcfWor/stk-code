@@ -39,6 +39,7 @@
 #include "network/protocols/server_lobby.hpp"
 #include "network/server_config.hpp"
 #include "utils/string_utils.hpp"
+#include "utils/log.hpp"
 #include <parser/argline_parser.hpp>
 #include <string>
 #include <unistd.h>

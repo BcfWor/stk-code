@@ -179,6 +179,8 @@ void LiveSoccer::exportLiveData()
         return;
 
     SoccerWorld* soccer_world = dynamic_cast<SoccerWorld*>(World::getWorld());
+    if (!soccer_world)
+        return;
     try
     {
         std::stringstream json;

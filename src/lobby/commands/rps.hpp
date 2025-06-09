@@ -30,9 +30,7 @@ public:
     RPSCommand() : STKCommand(false)
     {
         m_name = "rps";
-        m_args = {{nnwcli::CT_STRING, "option", "r/p/s, playername or \"accept\""},
-                  {nnwcli::CT_DOUBLE, "sum2", "Value 2 for summation"},
-                  {nnwcli::CT_STRING, "word", "Test word"}};
+        m_args = {{nnwcli::CT_STRING, "option", "r/p/s, playername or \"accept\""}};
         m_description = "Send Rock Paper Scissors challenge for the player, choose the variant"
             " or accept other challenges.";
     }

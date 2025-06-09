@@ -39,13 +39,6 @@ bool kartRestrictionCommandOf(nnwcli::CommandExecutorContext* const ctx,
     ServerLobby* const lobby = stk_ctx->get_lobby();
 
     irr::core::stringw response;
-    if (ServerConfig::m_soccer_log)
-    {
-        ctx->write("You can only use this command on unranked TierS servers");
-        ctx->flush();
-        return false;
-    }
-
     if (state == (lobby->getKartRestrictionMode() ==
                 KartRestrictionMode::HEAVY))
     {
@@ -55,7 +48,7 @@ bool kartRestrictionCommandOf(nnwcli::CommandExecutorContext* const ctx,
         return false;
     }
 
-    if (!ServerConfig::m_tiers_roulette)
+    if (!ServerConfig::m_tiers_roulette && !ServerConfig::m_soccer_log)
     {
         // can be voted
         CMD_VOTABLE(data, true);

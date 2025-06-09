@@ -53,13 +53,5 @@ bool EndGameCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
 
     lobby->sendStringToAllPeers("The game has been interrupted.");
 
-	if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
-	{
-	    std::ofstream log(ServerConfig::m_live_soccer_log_path, std::ios::app);
-	    log << "/end is used";
-	    log.close();
-	    Log::verbose("EndGameCommand", "/end log");
-	}
-
     return true;
 }

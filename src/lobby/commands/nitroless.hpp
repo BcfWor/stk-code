@@ -30,7 +30,7 @@ public:
     NitrolessCommand() : STKCommand(true/*votable*/)
     {
         m_name = "nitroless";
-        m_args = {{nnwcli::CT_BOOL, "sum1", "State: on or off"}};
+        m_args = {{nnwcli::CT_BOOL, "state", "State: on or off"}};
         m_description = "Enables or disables nitroless mode.";
     }
     virtual bool execute(nnwcli::CommandExecutorContext* context, void* data) OVERRIDE;
