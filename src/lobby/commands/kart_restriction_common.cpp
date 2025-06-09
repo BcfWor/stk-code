@@ -48,6 +48,13 @@ bool kartRestrictionCommandOf(nnwcli::CommandExecutorContext* const ctx,
         return false;
     }
 
+    if (lobby->getCurrentState() != ServerLobby::WAITING_FOR_START_GAME)
+    {
+        ctx->write("Game is currently active.");
+        ctx->flush();
+        return false;
+    }
+
     if (!ServerConfig::m_tiers_roulette && !ServerConfig::m_soccer_log)
     {
         // can be voted

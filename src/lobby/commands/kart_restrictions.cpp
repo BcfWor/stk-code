@@ -97,6 +97,12 @@ bool RandomkartsCommand::execute(nnwcli::CommandExecutorContext* const ctx, void
         CMD_VOTABLE(data, false);
         return false;
     }
+    if (lobby->getCurrentState() != ServerLobby::WAITING_FOR_START_GAME)
+    {
+        ctx->write("Game is currently active.");
+        ctx->flush();
+        return false;
+    }
 
     CMD_VOTABLE(data, true);
     CMD_SELFVOTE_PERMLOWER_CROWN(stk_ctx, data, m_min_veto, parser);
