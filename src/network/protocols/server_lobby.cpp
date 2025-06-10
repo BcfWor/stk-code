@@ -66,6 +66,7 @@
 #include "utils/random_generator.hpp"
 #include "utils/string_utils.hpp"
 #include "utils/time.hpp"
+#include <cmath>
 #include <unordered_map>
 #include <algorithm>
 #include <cassert>
@@ -8595,22 +8596,30 @@ unmute_error:
 	   if (it != TZ_OFFSETS.end())
 	   {
 	   // get time from server
-	   time_t now = time(nullptr);
-           tm *gmtm = gmtime(&now);
-           // apply manually
-           int hours_offset = static_cast<int>(it->second);
-           int minutes_offset = static_cast<int>((it->second - hours_offset) * 60);
+           time_t now_utc_ts = time(nullptr);
 
-           gmtm->tm_hour += hours_offset;
-           gmtm->tm_min += minutes_offset;
-           time_t adjusted = mktime(gmtm);
-           gmtm = gmtime(&adjusted);
+           double total_offset_hours = it->second; // e.g., 5.5 for IST
+           int total_offset_seconds = static_cast<int>(total_offset_hours * 3600.0);
+
+           time_t target_ts = now_utc_ts + total_offset_seconds;
+
+           tm *display_tm = gmtime(&target_ts);
+           if (!display_tm) {
+               // It's good practice to check if gmtime returned null
+               sendStringToPeer("Error: Could not calculate target time due to gmtime failure.", peer);
+               return;
+           }
+
            char buffer[256];
-           // indicator string
-           char tz_indicator[10];
-           snprintf(tz_indicator, sizeof(tz_indicator), "UTC%+d:%02d", hours_offset, abs(minutes_offset));
+           char tz_indicator[20]; // Increased size for safety
 
-           strftime(buffer, sizeof(buffer), "%H:%M:%S | %a, %d-%m-%Y", gmtm);
+           int hours_display_offset = static_cast<int>(total_offset_hours);
+           // Calculate minutes part for display, ensuring it's positive
+           int minutes_display_offset = static_cast<int>(std::abs((total_offset_hours - hours_display_offset) * 60.0));
+
+           snprintf(tz_indicator, sizeof(tz_indicator), "UTC%+d:%02d", hours_display_offset, minutes_display_offset);
+
+           strftime(buffer, sizeof(buffer), "%H:%M:%S | %a, %d-%m-%Y", display_tm);
            std::string time_msg = "[TIME] " + tz + " (" + tz_indicator + ") " + std::string(buffer);
            // send msg
 		  sendStringToPeer(time_msg, peer);
