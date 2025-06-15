@@ -200,6 +200,7 @@ void ServerLobbyCommands::registerCommands()
     m_executor.add_alias("dm", "msg");
     m_executor.add_alias("private", "msg");
     m_executor.register_command(std::make_shared<ScoreCommand>());
+    m_executor.add_alias("sc", "score");
     m_executor.register_command(std::make_shared<RankListCommand>());
     m_executor.add_alias("rank10", "ranklist");
     m_executor.add_alias("top", "ranklist");
