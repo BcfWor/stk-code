@@ -53,7 +53,7 @@ bool RPSCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* const 
 
     player_name = stk_ctx->getProfileName();
 
-    std::string arg_lower = player_name;
+    std::string arg_lower = variant;
     std::transform(arg_lower.begin(), arg_lower.end(), arg_lower.begin(),
                    [](unsigned char c){ return std::tolower(c); });
 
