@@ -28,11 +28,11 @@ RPSChoice RockPaperScissors::rpsFromString(const std::string& arg)
     if (arg_lowercase.empty())
         return RPS_NONE;
 
-    if (arg_lowercase[0] == 'r')
+    if (arg_lowercase == "r" || arg_lowercase == "rock")
         return RPS_ROCK;
-    if (arg_lowercase[0] == 'p')
+    if (arg_lowercase == "p" || arg_lowercase == "paper")
         return RPS_PAPER;
-    if (arg_lowercase[0] == 's')
+    if (arg_lowercase == "s" || arg_lowercase == "scissors")
         return RPS_SCISSORS;
     
     return RPS_NONE;

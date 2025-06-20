@@ -439,6 +439,7 @@ void loadServerLobbyFromConfig()
     std::shared_ptr<LobbyProtocol> server_lobby;
     server_lobby = STKHost::create();
 
+    RaceManager::get()->setInfiniteMode(m_infinite_game);
     server_lobby->getGameSetup()
         ->setSoccerGoalTarget(m_soccer_goal_target);
     if (is_gp)

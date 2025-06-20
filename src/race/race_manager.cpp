@@ -1175,7 +1175,25 @@ void RaceManager::startSingleRace(const std::string &track_ident,
 
     setTrack(track_ident);
 
-    if (isInfiniteMode()) setNumLaps( std::numeric_limits<int>::max() );
+    if (isInfiniteMode())
+    {
+        switch (getMinorMode())
+        {
+            case RaceManager::MINOR_MODE_SOCCER:
+                setTimeTarget(std::numeric_limits<float>::infinity());
+                break;
+            case RaceManager::MINOR_MODE_3_STRIKES:
+            case RaceManager::MINOR_MODE_FREE_FOR_ALL:
+            case RaceManager::MINOR_MODE_CAPTURE_THE_FLAG:
+                setHitCaptureTime(
+                        std::numeric_limits<int>::max(),
+                        std::numeric_limits<float>::infinity());
+                break;
+            default:
+                setNumLaps(std::numeric_limits<int>::max());
+                break;
+        }
+    }
     else if (num_laps != -1) setNumLaps( num_laps );
 
     setMajorMode(RaceManager::MAJOR_MODE_SINGLE);

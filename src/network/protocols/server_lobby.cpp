@@ -36,6 +36,7 @@
 #include "modes/linear_world.hpp"
 #include "modes/soccer_world.hpp"
 #include "network/crypto.hpp"
+#include <cstdint>
 
 #ifdef ENABLE_SQLITE3
 #include "network/database/sqlite_database.hpp"
@@ -1526,8 +1527,12 @@ NetworkString* ServerLobby::getLoadWorldMessage(
     load_world_message->addUInt32(m_item_seed);
     if (RaceManager::get()->isBattleMode())
     {
-        load_world_message->addUInt32(m_battle_hit_capture_limit)
-            .addFloat(m_battle_time_limit);
+        if (RaceManager::get()->isInfiniteMode())
+            load_world_message->addUInt32(std::numeric_limits<std::uint32_t>::max())
+                .addFloat(std::numeric_limits<float>::infinity());
+        else
+            load_world_message->addUInt32(m_battle_hit_capture_limit)
+                .addFloat(m_battle_time_limit);
         uint16_t flag_return_time = (uint16_t)stk_config->time2Ticks(
             ServerConfig::m_flag_return_timeout);
         load_world_message->addUInt16(flag_return_time);
@@ -2777,7 +2782,7 @@ skip_default_vote_randomizing:
            .addFloat(voting_timeout)
            .addUInt8(m_game_setup->isGrandPrixStarted() ? 1 : 0)
            .addUInt8((ServerConfig::m_auto_game_time_ratio > 0.0f ||
-            m_fixed_laps != -1) ? 1 : 0)
+            m_fixed_laps != -1 || RaceManager::get()->isInfiniteMode()) ? 1 : 0)
            .addUInt8(track_voting ? 1 : 0);
 
 
@@ -4113,17 +4118,17 @@ void ServerLobby::handlePlayerVote(Event* event)
     }
 
     // Remove / adjust any invalid settings
-    if (RaceManager::get()->modeHasLaps())
+    if (RaceManager::get()->isInfiniteMode())
+    {
+        vote.m_num_laps = std::numeric_limits<uint8_t>::max();
+    }
+    else if (RaceManager::get()->modeHasLaps())
     {
         if (ServerConfig::m_auto_game_time_ratio > 0.0f)
         {
             vote.m_num_laps =
                 (uint8_t)(fmaxf(1.0f, (float)t->getDefaultNumberOfLaps() *
                 ServerConfig::m_auto_game_time_ratio));
-        }
-        if (RaceManager::get()->isInfiniteMode())
-        {
-            vote.m_num_laps = std::numeric_limits<uint8_t>::max();
         }
         else if (m_game_setup->isSoccerGoalTarget())
         {
@@ -6964,6 +6969,10 @@ void ServerLobby::determineRPSWinner(RPSChallenge& challenge)
     }
     STKPeer* winner_peer;
     STKPeer* loser_peer;
+    RPSChoice winner_choice;
+    RPSChoice loser_choice;
+    std::string winner_name;
+    std::string loser_name;
 
     if (challenge.challenger_choice == challenge.challenged_choice)
     {
@@ -6981,29 +6990,37 @@ void ServerLobby::determineRPSWinner(RPSChallenge& challenge)
     else if (RockPaperScissors::wins(
                 challenge.challenger_choice, challenge.challenged_choice))
     {
-        winner_peer = challenger_peer.get();
-        loser_peer = challenged_peer.get();
+        winner_choice = challenge.challenged_choice;
+        loser_choice = challenge.challenger_choice;
+        winner_name = challenge.challenged_name;
+        loser_name = challenge.challenger_name;
+        winner_peer = challenged_peer.get();
+        loser_peer = challenger_peer.get();
     }
     else
     {
-        winner_peer = challenged_peer.get();
-        loser_peer = challenger_peer.get();
+        winner_choice = challenge.challenger_choice;
+        loser_choice = challenge.challenged_choice;
+        winner_name = challenge.challenger_name;
+        loser_name = challenge.challenged_name;
+        winner_peer = challenger_peer.get();
+        loser_peer = challenged_peer.get();
     }
     if (winner_peer)
     {
         std::string result = "You won! You chose " +
-            RockPaperScissors::rpsToString(challenge.challenger_choice) + " and " + 
-            challenge.challenged_name + " chose " +
-            RockPaperScissors::rpsToString(challenge.challenged_choice) + ".";
+            RockPaperScissors::rpsToString(winner_choice) + " and " + 
+            loser_name + " chose " +
+            RockPaperScissors::rpsToString(loser_choice) + ".";
         sendStringToPeer(result, winner_peer);
     }
     if (loser_peer)
     {
         std::string result =
             "You lost! You chose " +
-            RockPaperScissors::rpsToString(challenge.challenged_choice) + " and " + 
-            challenge.challenger_name + " chose " +
-            RockPaperScissors::rpsToString(challenge.challenger_choice) + ".";
+            RockPaperScissors::rpsToString(loser_choice) + " and " + 
+            winner_name + " chose " +
+            RockPaperScissors::rpsToString(winner_choice) + ".";
         sendStringToPeer(result, loser_peer);
     }
     for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end();)

@@ -124,7 +124,9 @@ void GameSetup::loadWorld()
 
         RaceManager::get()->setReverseTrack(false);
 
-        if (RaceManager::get()->isSoccerMode())
+        if (RaceManager::get()->isInfiniteMode())
+            RaceManager::get()->setTimeTarget(std::numeric_limits<float>::infinity());
+        else if (RaceManager::get()->isSoccerMode())
         {
             if (isSoccerGoalTarget())
                 RaceManager::get()->setMaxGoal(m_laps);
