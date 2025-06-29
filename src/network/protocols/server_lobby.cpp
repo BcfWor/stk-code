@@ -6683,6 +6683,7 @@ std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username)
             try {
                 rating = std::stoi(word);
             } catch (const std::exception& e) {
+                Log::error("ServerLobby", "Couldn't read ranking for player %s: %s", name.c_str(), e.what());
                 continue;
             }
         }
