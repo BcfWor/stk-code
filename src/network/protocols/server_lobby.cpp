@@ -6680,7 +6680,11 @@ std::pair<unsigned int, int> ServerLobby::getSoccerRanking(std::string username)
         iss >> name;
         std::string word;
         while (iss >> word) {
-            rating = std::stoi(word);
+            try {
+                rating = std::stoi(word);
+            } catch (const std::exception& e) {
+                continue;
+            }
         }
         if (name == username)
             return std::make_pair(rank, rating);
