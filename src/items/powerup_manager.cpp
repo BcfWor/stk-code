@@ -40,6 +40,7 @@
 #include <IMesh.h>
 
 PowerupManager* powerup_manager = nullptr;
+unsigned int powerup_multiplier = 1;
 //-----------------------------------------------------------------------------
 /** The constructor initialises everything to zero. */
 PowerupManager::PowerupManager()
