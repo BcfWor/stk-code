@@ -59,11 +59,16 @@ namespace StringUtils
     {
         if (str.length() < prefix.length())
             return false;
-        else if (ignoreCase)
-            return strncasecmp(str.c_str(), prefix.c_str(), prefix.size())==0;
+        else if (strncmp(str.c_str(), prefix.c_str(), prefix.size())==0)
+            return true;
+        // Ignore left-to-right markers for the purpose of string comparison
+        else if (strncmp(str.c_str(), ("\u200F" + prefix).c_str(), prefix.size() + 1)==0)
+            return true;
+        else if (strncmp(str.c_str(), ("\u200E" + prefix).c_str(), prefix.size() + 1)==0)
+            return true;
         else
-            return strncmp(str.c_str(), prefix.c_str(), prefix.size())==0;
-    }   // startsWith
+            return false;
+    }
 
     bool wideStartsWith(const core::stringw& str, const core::stringw& prefix, const bool ignoreCase)
     {
@@ -74,14 +79,6 @@ namespace StringUtils
         else
             return wcsncmp(str.c_str(), prefix.c_str(), prefix.size()) == 0;
     }   //wideStartsWith
-
-    bool equalsIgnoreCase(const std::string& a, const std::string& b)
-    {
-        if (a.length() != b.length())
-            return false;
-
-        return strncasecmp(a.c_str(), b.c_str(), a.length());
-    }   //equalsIgnoreCase
 
     //-------------------------------------------------------------------------
     /** Returns the path of a filename, i.e. everything till the last '/'.
