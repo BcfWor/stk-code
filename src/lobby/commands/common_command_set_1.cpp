@@ -159,8 +159,8 @@ bool DatetimeCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* c
       {"KST", 9},
       {"SGT", 8},
       {"ICT", 7},
-      {"MST", 5.5},
-      {"PST", 8},
+      {"MYT", 5.5},
+      {"PHST", 8},
       {"LKT", 5.5},
       
       // countries (average)
@@ -238,19 +238,39 @@ bool DatetimeCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* c
    else
    {
            
-       ctx->write("Invalid timezone or country code. \n"
-           "Valid codes: ");
-       bool nfirst = false;
-       for (const auto& pair : TZ_OFFSETS) {
-           if (nfirst)
-               ctx->write(", ");
-           ctx->write(pair.first);
-           nfirst = true;
-       }
+       ctx->write("Invalid timezone or country code. \nValid codes:\n\n");
+
+       const std::vector<std::string> america = {"EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT", "AKST", "AKDT", "HST", "HDT"};
+       const std::vector<std::string> europe = {"GMT", "BST", "CET", "CEST", "EET", "EEST", "WET", "WEST", "MSK"};
+       const std::vector<std::string> asia = {"AFT", "IST", "PKT", "IRST", "IRDT", "CST", "CDT", "JST", "KST", "SGT", "ICT", "MYT", "PHST", "LKT"};
+       const std::vector<std::string> country = {"BR", "IN", "AR", "CH", "FR", "IT", "RU", "ES", "PL", "MX", "NL", "CA", "DE", "US", "JP", "GB", "AU", "ZA", "KR", "EG", "NG", "TR", "SE", "FI", "BE", "PT", "DK"};
+
+       auto write_group = [&](const std::string& title, const std::vector<std::string>& list) {
+           ctx->write(title + ":\n");
+           int count = 0;
+           for (size_t i = 0; i < list.size(); ++i) {
+               ctx->write(list[i]);
+               if (i != list.size() -1) ctx->write(", ");
+               count++;
+               if (count == 11) {
+                   ctx->write("\n");
+                   count=0;
+               }
+           }
+           ctx->write("\n\n");
+       };
+
+       write_group("America", america);
+       write_group("Europe", europe);
+       write_group("Asia", asia);
+       write_group("Countries", country);
+
        ctx->flush();
        return false;
    }
 }
+
+
 bool GoalHistoryCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* const data)
 {
     STK_CTX(stk_ctx, ctx);
