@@ -43,6 +43,7 @@
 #include "lobby/commands/spectate.hpp"
 #include "lobby/commands/speedstats.hpp"
 #include "lobby/commands/stk_seen.hpp"
+#include "lobby/commands/stk_seen_optout.hpp"
 #include "lobby/commands/unban.hpp"
 #include "lobby/commands/vote.hpp"
 #include "lobby/commands/help.hpp"
@@ -245,6 +246,8 @@ void ServerLobbyCommands::registerCommands()
     {
         m_executor.register_command(std::make_shared<StkSeenCommand>());
         m_executor.add_alias("seen", "stk-seen");
+	m_executor.register_command(std::make_shared<StkSeenOptOutCommand>());
+	m_executor.add_alias("toggle-antitrack", "stk-seen-optout");
     }
     m_executor.register_command(std::make_shared<DatetimeCommand>());
     m_executor.add_alias("date", "datetime");
