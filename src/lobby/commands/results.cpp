@@ -38,29 +38,84 @@ bool ResultsCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
     std::string result = lobby->get_elo_change_string();
 
     if (result.empty())
+    {
         ctx->write("No ELO changes");
+    }
     else
     {
         // Check if result contains only duration line (no ELO changes)
         bool has_elo_changes = false;
+        bool parse_error = false;
+
         std::istringstream iss(result);
         std::string line;
+        std::string duration_line;
+        std::ostringstream formatted;
+
         while (std::getline(iss, line))
         {
-            if (line.find("The game lasted") == std::string::npos && !line.empty())
+            if (line.empty())
+                continue;
+
+            // duration line
+            if (line.find("The game lasted") != std::string::npos)
             {
-                has_elo_changes = true;
+                duration_line = line;
+                continue;
+            }
+
+            
+            size_t last_space = line.find_last_of(' ');
+            if (last_space == std::string::npos)
+            {
+                parse_error = true;
                 break;
             }
+
+            std::string player = line.substr(0, last_space);
+            std::string change_str = line.substr(last_space + 1);
+
+            int delta = 0;
+            try
+            {
+                delta = std::stoi(change_str);
+            }
+            catch (...)
+            {
+                parse_error = true;
+                break;
+            }
+
+            if (delta != 0)
+            {
+                has_elo_changes = true;
+                formatted << player << " -> "
+                          << (delta > 0 ? "+" : "") << delta
+                          << "\n";
+            }
         }
-        
-        if (!has_elo_changes)
-            ctx->write("No ELO changes\n\n" + result);
+
+        // if something wrong -> clean fallback
+        if (parse_error)
+        {
+            std::string msg = "No ELO changes";
+            if (!duration_line.empty())
+                msg += "\n" + duration_line;
+            ctx->write(msg);
+        }
+        else if (!has_elo_changes)
+        {
+            std::string msg = "No ELO changes";
+            if (!duration_line.empty())
+                msg += "\n" + duration_line;
+            ctx->write(msg);
+        }
         else
-            ctx->write(result);
+        {
+            ctx->write(formatted.str());
+        }
     }
 
     ctx->flush();
-
     return true;
 }
