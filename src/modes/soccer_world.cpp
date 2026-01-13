@@ -581,9 +581,12 @@ void GoalHistory::addGoalData(const std::string& player, float speed, int team)
 //-----------------------------------------------------------------------------
 void GoalHistory::showTeamGoalHistory(std::stringstream& oss, int team)
 {
+	std::string team_color_header = (team == 0) ? "Red" : "Blue";
+    oss << "Goal History (" << team_color_header << "):\n";
+	
     if (s_goal_history.empty())
     {
-        oss << "No goals scored yet!";
+        oss << "No goals scored by " << team_color_header << " team yet!";
         return;
     }
 
@@ -594,8 +597,7 @@ void GoalHistory::showTeamGoalHistory(std::stringstream& oss, int team)
         {
             found_goals = true;
             std::string team_color = (team == 0) ? "Red" : "Blue";
-            oss << team_color + " goal by " + goal.player_name +
-                                " with " + std::to_string((int)goal.speed) + " km/h";
+            oss << team_color << " goal with " << (int)goal.speed << "km/h by " << goal.player_name << "\n";
         }
     }
 
