@@ -4473,6 +4473,10 @@ bool ServerLobby::checkPeersReady(bool ignore_ai_peer) const
         auto peer = p.first.lock();
         if (!peer)
             continue;
+	// Spectators (and peers waiting for the next game) should not block
+	// ready checks for starting.
+	if (peer->isWaitingForGame() || peer->isSpectator() || peer->alwaysSpectate())
+	    continue;
         if (ignore_ai_peer && peer->isAIPeer())
             continue;
         all_ready = all_ready && p.second;
