@@ -146,17 +146,17 @@ bool StkSeenCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
 			return;
 		}
 
-		std::string username, country, server, server_country, date;
-		xml->get("username", &username);
-		xml->get("country", &country);
-		xml->get("server", &server);
-		xml->get("server-country", &server_country);
-		xml->get("date", &date);
+		irr::core::stringw username, country, server, server_country, date;
+		xml->getAndDecode("username", &username);
+		xml->getAndDecode("country", &country);
+		xml->getAndDecode("server", &server);
+		xml->getAndDecode("server-country", &server_country);
+		xml->getAndDecode("date", &date);
 
 		if (auto peer_locked = peer_wk.lock())
 		{
-			std::string msg = StringUtils::insertValues(
-				"Player %s (%s) was last seen on server %s (%s) at %s",
+			irr::core::stringw msg = StringUtils::insertValues(
+				irr::core::stringw("Player %s (%s) was last seen on server %s (%s) at %s"),
 				username, country, server, server_country, date);
 			std::shared_ptr<STKPeer> peer = peer_locked;
 			lobby_raw->sendStringToPeer(msg, peer);
