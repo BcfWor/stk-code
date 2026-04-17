@@ -96,7 +96,7 @@ bool KickallCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
 
     auto parser = ctx->get_parser();
     parser->parse_finish();
-
+    CMD_REQUIRE_CROWN_OR_PERM(stk_ctx, m_required_perm)
     auto peers = STKHost::get()->getPeers();
     for (unsigned int i = 0; i < peers.size(); i++)
     {
