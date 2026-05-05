@@ -2690,7 +2690,8 @@ void ServerLobby::setKartRestrictionMode(const enum KartRestrictionMode mode)
  */
 void ServerLobby::startSelection(const Event *event)
 {		
-	if (event)
+	bool has_eligible_peers = false;
+    if (event)
 	{
         // ready button pressed
 		std::shared_ptr<STKPeer> peer = event->getPeerSP();
@@ -2705,12 +2706,13 @@ void ServerLobby::startSelection(const Event *event)
 		// check if player can play
         const PeerEligibility old_eligibility = peer->getEligibility();
         const PeerEligibility new_eligibility = peer->testEligibility();
+        has_eligible_peers |= peer->isEligibleForGame();
         LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_eligibility);
 
         if (new_eligibility != old_eligibility)
             updatePlayerList();
 
-        // Do checks only if this player is not server owner
+        // Do checks only if this player is not server owner and it is not the only eligible player.
         if (m_server_owner.lock() != peer)
         {
             switch (new_eligibility)
@@ -2808,20 +2810,6 @@ void ServerLobby::startSelection(const Event *event)
     unsigned max_player = 0;
     STKHost::get()->updatePlayers(&max_player);
     
-    if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
-    {
-        GlobalLog::writeLog("GAME_START\n", GlobalLogTypes::POS_LOG);
-        
-        time_t now;
-        time(&now);
-        char buf[sizeof "2011-10-08T07:07:09Z"];
-        strftime(buf, sizeof buf, "%FT%TZ", gmtime(&now));
-        std::string buf2;
-        for (size_t i = 0; i < sizeof(buf) - 1; i++)
-            buf2 += buf[i];
-        std::string msg = "Match started at " + buf2 + "\n";
-        GlobalLog::writeLog(msg, GlobalLogTypes::POS_LOG);
-    }
 
     if (always_spectate_peers.size() == peers.size())
     {
@@ -2847,17 +2835,31 @@ void ServerLobby::startSelection(const Event *event)
             break;
     }
 
+    //bool eligibility_player_list = false;
     for (auto peer : peers)
     {
         // update eligibility of all peers except the one who pressed the button
-        if ((!event || peer != event->getPeerSP()) && !peer->isEligibleForGame())
+        if ((!event || peer != event->getPeerSP()))
         {
-            peer->setWaitingForGame(true);
-            if (peer->getPermissionLevel() >= PERM_SPECTATOR &&
-                    peer->notRestrictedBy(PRF_NOSPEC) && peer->getAlwaysSpectate() != ASM_COMMAND)
-                peer->setAlwaysSpectate(ASM_FULL);
-            always_spectate_peers.insert(peer.get());
-            continue;
+            // Enable this part of code to actually recheck eligibilities when start button is pressed.
+#ifdef SERVERLOBBY_SELECTION_UPDATEELIG
+            const PeerEligibility old_eligibility = peer->getEligibility();
+            const PeerEligibility new_eligibility = peer->testEligibility();
+            LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_eligibility);
+            if (new_eligibility != old_eligibility)
+                eligibility_player_list = true;
+#endif
+
+            if (!peer->isEligibleForGame())
+            {
+                peer->setWaitingForGame(true);
+                if (peer->getPermissionLevel() >= PERM_SPECTATOR &&
+                        peer->notRestrictedBy(PRF_NOSPEC) && peer->getAlwaysSpectate() != ASM_COMMAND)
+                    peer->setAlwaysSpectate(ASM_FULL);
+                always_spectate_peers.insert(peer.get());
+                continue;
+            } else 
+                has_eligible_peers = true;
         }
         // Spectators won't remove maps as they are already waiting for game
         if (!peer->isValidated() || peer->isWaitingForGame())
@@ -2869,6 +2871,13 @@ void ServerLobby::startSelection(const Event *event)
             peer->eraseServerTracks(m_available_kts.second, tracks_erase);
         }
     }
+#if SERVERLOBBY_SELECTION_UPDATEELIG
+    if (eligibility_player_list)
+        updatePlayerList();
+#endif
+    if (!has_eligible_peers)
+        // abort starting the game at all.
+        return;
 
     for (const std::string& kart_erase : karts_erase)
     {
@@ -2916,6 +2925,21 @@ void ServerLobby::startSelection(const Event *event)
             else
                 it++;
         }
+    }
+
+    if (ServerConfig::m_soccer_log || ServerConfig::m_race_log)
+    {
+        GlobalLog::writeLog("GAME_START\n", GlobalLogTypes::POS_LOG);
+        
+        time_t now;
+        time(&now);
+        char buf[sizeof "2011-10-08T07:07:09Z"];
+        strftime(buf, sizeof buf, "%FT%TZ", gmtime(&now));
+        std::string buf2;
+        for (size_t i = 0; i < sizeof(buf) - 1; i++)
+            buf2 += buf[i];
+        std::string msg = "Match started at " + buf2 + "\n";
+        GlobalLog::writeLog(msg, GlobalLogTypes::POS_LOG);
     }
 
     // These tracks will never be selected when track voting is disabled
@@ -3089,6 +3113,7 @@ void ServerLobby::startSelection(const Event *event)
         peer->sendPacket(ns, true/*reliable*/);
         delete ns;
     }
+    Log::verbose("ServerLobby", "Started selection");
     m_state = SELECTING;    
     if (!always_spectate_peers.empty())
     {

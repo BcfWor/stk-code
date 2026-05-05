@@ -70,6 +70,7 @@ bool SetModeCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* co
     }
     else
     {
+        CMD_VOTABLE(data, false);
         CMD_REQUIRE_CROWN_OR_PERM(stk_ctx, m_override_perm);
     }
 
@@ -124,6 +125,7 @@ bool SetDifficultyCommand::execute(nnwcli::CommandExecutorContext* const ctx, vo
     }
     else
     {
+        CMD_VOTABLE(data, false);
         CMD_REQUIRE_CROWN_OR_PERM(stk_ctx, m_override_perm);
     }
 
@@ -171,6 +173,7 @@ bool SetGoalTargetCommand::execute(nnwcli::CommandExecutorContext* const ctx, vo
     }
     else
     {
+        CMD_VOTABLE(data, false);
         CMD_REQUIRE_CROWN_OR_PERM(stk_ctx, m_override_perm);
     }
 

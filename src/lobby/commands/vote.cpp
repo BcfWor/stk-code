@@ -64,6 +64,8 @@ bool VoteCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* data)
         // this is the only non-selfvotable command, it needs to use an external parser instead of the current
         // In other commands that can commit self-vote the parser is reused and reset to the beginning with
         // parser->reset_pos();
+        parser->reset_pos();
+        parser->reset_argument_pos();
         dispatchdata->m_voted_args = std::make_shared<nnwcli::ArglineParser>(argline);
     }
     catch (const nnwcli::command_not_found& e)

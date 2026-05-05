@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <cstdlib>
 #include <errno.h>
+#include <exception>
 #include <functional>
 #include <typeinfo>
 

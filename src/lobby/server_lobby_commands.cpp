@@ -21,6 +21,7 @@
 
 // COMMANDS
 #include "argument_types.hpp"
+#include "globals.hpp"
 #include "lobby/commands/ban.hpp"
 #include "lobby/commands/broadcast.hpp"
 #include "lobby/commands/chaosparty.hpp"
@@ -114,6 +115,10 @@
 #include "network/server_config.hpp"
 #include "network/stk_peer.hpp"
 #include "network/stk_host.hpp"
+#include "parser/abstract_parser.hpp"
+#include <exception>
+#include <iostream>
+#include <stdexcept>
 #ifdef ENABLE_SQLITE3
 #include "network/database/abstract_database.hpp"
 #include "network/database/sqlite_database.hpp"
@@ -178,6 +183,11 @@ void ServerLobbyCommands::create()
 {
     g_instance = new ServerLobbyCommands();
     Log::verbose(LOGNAME, "Created instance");
+    nnwcli::not_enough_arguments test1;
+    nnwcli::cli_error* const test2 = dynamic_cast<nnwcli::cli_error*>(&test1);
+    if (!test2) {
+        Log::fatal("Debug", "NNWCLI failed to properly link the inheritance of exceptions. Disastrous.");
+    }
 }
 void ServerLobbyCommands::destroy()
 {
@@ -415,6 +425,14 @@ void ServerLobbyCommands::handleServerCommand(ServerLobby* const lobby, std::sha
 #endif
     try {
         m_executor.dispatch_line(line, context, &dispatch_data);
+        // For some reason, NNWCLI's cli_error does not qualify as `std::exception`
+    } catch (const nnwcli::cli_error& e) {
+        Log::error(LOGNAME, "Could not execute the command \"%s\" by %s: %s",
+                line.c_str(), context->getProfileName().c_str(), e.what());
+
+        context->write("An unknown error has occurred when trying to execute the command. Inform server staff.");
+        context->flush();
+        return;
     } catch (const std::exception& e) {
         Log::error(LOGNAME, "Could not execute the command \"%s\" by %s: %s",
                 line.c_str(), context->getProfileName().c_str(), e.what());
@@ -438,6 +456,8 @@ void ServerLobbyCommands::handleServerCommand(ServerLobby* const lobby, std::sha
 
         // it has already been verified that the voted alias exists.
         assert(stk_command);
+        // special command /vote will redefine the parser, especially because some commands can reset the argument parsing procedure mid test vote.
+        context->set_parser(dispatch_data.m_voted_args);
 
         // if it wasn't a self-vote, test it
         if (!ServerConfig::m_command_voting)
@@ -461,7 +481,8 @@ void ServerLobbyCommands::handleServerCommand(ServerLobby* const lobby, std::sha
         else if (!dispatch_data.m_can_vote)
         {
             // previous test returned false, deny the permission
-            context->sendNoPermission();
+            context->write("This command cannot be voted.");
+            context->flush();
             return;
         }
         // command can be voted in, do it
@@ -472,6 +493,8 @@ void ServerLobbyCommands::handleServerCommand(ServerLobby* const lobby, std::sha
         };
         // generalize the argument line, e.g. turn yes/y/on/1 to "on"
         // for bool arg and so on
+        dispatch_data.m_voted_args->reset_pos();
+        dispatch_data.m_voted_args->reset_argument_pos();
         entry.bakeArgline();
         submitVote(lobby, context->getProfileName(), context.get(), entry);
     }
@@ -504,6 +527,10 @@ void ServerLobbyCommands::handleNetworkConsoleCommand(std::string& line)
         m_executor.dispatch_line(
             line, NetworkConsole::network_console_context, &dispatch_data);
     }
+    catch (const nnwcli::cli_error& e)
+    {
+        Log::error(LOGNAME, "Command parsing error: %s", e.what());
+    }
     catch (const std::exception& e)
     {
         Log::error(LOGNAME, "Could not execute command: %s", e.what());
@@ -520,11 +547,22 @@ bool ServerLobbyCommands::testVote(
     assert(data->m_voted_command);
     try {
         data->m_voted_command->execute(ctx, data);
-    } catch (const std::exception& e) {
-        ctx->write("Unable to vote because the command cannot be executed. Check the usage and try to vote again.\nUsage: /");
+    } catch (const nnwcli::cli_error& e) {
+        ctx->write("Unable to vote because the command cannot be executed. Check the usage and try to vote again.\nUsage: ");
         std::stringstream ss;
         data->m_voted_command->format_usage_into(ss, data->m_voted_alias);
         *ctx << ss;
+        ctx->flush();
+        return false;
+    } catch (const std::invalid_argument& e) {
+        ctx->write("Unable to vote because of wrongly specified argument. Check the usage and try to vote again.\nUsage: ");
+        std::stringstream ss;
+        data->m_voted_command->format_usage_into(ss, data->m_voted_alias);
+        *ctx << ss;
+        ctx->flush();
+        return false;
+    } catch (const std::exception& e) {
+        ctx->write("Unable to vote because of an unknown error. Report this issue with /report");
         ctx->flush();
         return false;
     }
@@ -646,7 +684,6 @@ void ServerLobbyCommands::VoteEntry::bakeArgline()
                 char arg;
                 if (!m_voted_args->parse_tinyint(arg, !opt))
 		    break;
-                if (nfirst)
                 if (nfirst)
                     res << whitespace;
                 res << arg;
@@ -856,10 +893,15 @@ void ServerLobbyCommands::dispatchVotedCommand(ServerLobby* const lobby, std::sh
     try {
         DispatchData dispatch_data;
         cmd->execute(ctx.get(), &dispatch_data);
-    } catch (std::exception& e) {
-        Log::error(LOGNAME, "Could not execute voted-in command \"%s\" as network console with arguments \"%s\". %s",
+    } catch (const nnwcli::cli_error& e) {
+        Log::error(LOGNAME, "Could not execute voted-in command \"%s\" as network console with arguments \"%s\". NNWCLI error: %s",
                 cmd->get_name().c_str(), argline.c_str(), e.what());
         std::string msg = "Could not execute the voted-in command for some reason. Contact the server administrator.";
+        lobby->sendStringToAllPeers(msg);
+    } catch (const std::exception& e) {
+        Log::error(LOGNAME, "Could not execute voted-in command \"%s\" as network console with arguments \"%s\". %s",
+                cmd->get_name().c_str(), argline.c_str(), e.what());
+        std::string msg = "Could not execute the voted-in command because it couldn't be parsed.";
         lobby->sendStringToAllPeers(msg);
     }
 }

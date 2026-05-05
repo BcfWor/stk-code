@@ -24,7 +24,6 @@
 #include "network/server_config.hpp"
 #include "utils/log.hpp"
 #include <parser/argline_parser.hpp>
-#include <stdexcept>
 #include <string>
 #include <cctype>
 #include <cstdlib>
@@ -36,6 +35,7 @@ bool SlotsCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* cons
     STK_CTX(stk_ctx, ctx);
 
     auto parser = ctx->get_parser();
+    Log::verbose(LOGNAME, "debug: pos %d argpos %d.", parser->get_pos(), parser->get_argument_pos());
 
     unsigned char amount;
 
@@ -60,6 +60,12 @@ bool SlotsCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* cons
     // Read the slots value as string first and validate
     std::string amount_str;
     parser->parse_string(amount_str, true);
+    if (!parser->exhausted()) {
+        std::string remanent;
+        parser->parse_full(remanent);
+        Log::verbose(LOGNAME, "Amount str: %s, Remnant: %s", amount_str.c_str(), remanent.c_str());
+        return false;
+    }
     parser->parse_finish();
 
     bool numeric = !amount_str.empty();
