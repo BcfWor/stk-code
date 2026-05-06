@@ -183,11 +183,6 @@ void ServerLobbyCommands::create()
 {
     g_instance = new ServerLobbyCommands();
     Log::verbose(LOGNAME, "Created instance");
-    nnwcli::not_enough_arguments test1;
-    nnwcli::cli_error* const test2 = dynamic_cast<nnwcli::cli_error*>(&test1);
-    if (!test2) {
-        Log::fatal("Debug", "NNWCLI failed to properly link the inheritance of exceptions. Disastrous.");
-    }
 }
 void ServerLobbyCommands::destroy()
 {

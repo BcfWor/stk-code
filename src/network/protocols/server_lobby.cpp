@@ -3113,7 +3113,6 @@ void ServerLobby::startSelection(const Event *event)
         peer->sendPacket(ns, true/*reliable*/);
         delete ns;
     }
-    Log::verbose("ServerLobby", "Started selection");
     m_state = SELECTING;    
     if (!always_spectate_peers.empty())
     {
