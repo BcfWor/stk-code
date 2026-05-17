@@ -30,6 +30,11 @@
 #include <parser/argline_parser.hpp>
 #include <string>
 
+static bool isPeerInActiveGame(const STKPeer* peer)
+{
+    return peer && !peer->isWaitingForGame();
+}
+
 bool RPSCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* const data)
 {
     STK_CTX(stk_ctx, ctx);
@@ -47,6 +52,13 @@ bool RPSCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* const 
 
     ServerLobby* const lobby = stk_ctx->get_lobby();
     STKPeer* const peer = stk_ctx->get_peer();
+
+    if (isPeerInActiveGame(peer))
+    {
+        ctx->write("You can't use Rock Paper Scissors while in a game.");
+        ctx->flush();
+        return false;
+    }
 
     uint32_t peer_id = peer->getHostId();
     std::string player_name;
@@ -163,6 +175,13 @@ bool RPSCommand::execute(nnwcli::CommandExecutorContext* const ctx, void* const 
     if (target_id == peer_id)
     {
         ctx->write("You can't challenge yourself!");
+        ctx->flush();
+        return false;
+    }
+
+    if (isPeerInActiveGame(target_peer.get()))
+    {
+        ctx->nprintf("%s is in a game and can't be challenged.", 512, target_name.c_str());
         ctx->flush();
         return false;
     }

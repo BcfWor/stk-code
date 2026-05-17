@@ -3113,6 +3113,7 @@ void ServerLobby::startSelection(const Event *event)
         peer->sendPacket(ns, true/*reliable*/);
         delete ns;
     }
+    Log::verbose("ServerLobby", "Started selection");
     m_state = SELECTING;    
     if (!always_spectate_peers.empty())
     {
@@ -7304,19 +7305,29 @@ void ServerLobby::checkRPSTimeouts()
     uint64_t current_time = StkTime::getMonoTimeMs();
     for (auto it = m_rps_challenges.begin(); it != m_rps_challenges.end(); )
     {
+        std::shared_ptr<STKPeer> challenger_peer = NULL;
+        std::shared_ptr<STKPeer> challenged_peer = NULL;
+        for (auto& p : STKHost::get()->getPeers())
+        {
+            if (p->getHostId() == it->challenger_id)
+                challenger_peer = p;
+            else if (p->getHostId() == it->challenged_id)
+                challenged_peer = p;
+            if (challenger_peer && challenged_peer)
+                break;
+        }
+        const bool challenger_in_game = challenger_peer &&
+            !challenger_peer->isWaitingForGame();
+        const bool challenged_in_game = challenged_peer &&
+            !challenged_peer->isWaitingForGame();
+        if (challenger_in_game || challenged_in_game)
+        {
+            it = m_rps_challenges.erase(it);
+            continue;
+        }
+
         if (current_time > it->timeout)
         {
-            std::shared_ptr<STKPeer> challenger_peer = NULL;
-            std::shared_ptr<STKPeer> challenged_peer = NULL;
-            for (auto& p : STKHost::get()->getPeers())
-            {
-                if (p->getHostId() == it->challenger_id)
-                    challenger_peer = p;
-                else if (p->getHostId() == it->challenged_id)
-                    challenged_peer = p;   
-                if (challenger_peer && challenged_peer)
-                    break;
-            }
             // Challenges are now auto-accepted, so check if choices were made
             if (it->challenger_choice == RPS_NONE && it->challenged_choice == RPS_NONE)
             {
