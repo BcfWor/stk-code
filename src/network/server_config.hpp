@@ -344,7 +344,7 @@ namespace ServerConfig
 
 	SERVER_CFG_PREFIX StringServerConfigParam m_allowed_missing_tracks
 	    SERVER_CFG_DEFAULT(StringServerConfigParam(
-	    "hole_drop oasis",
+	    "hole_drop oasis xr_soccer",
 	    "allowed-missing-tracks",
 	    "Space-separated list of standard track identifiers that clients are allowed to miss without being blocked from joining."));
 
