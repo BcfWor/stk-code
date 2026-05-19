@@ -256,7 +256,6 @@ ServerLobby::ServerLobby() : LobbyProtocol()
 
 #ifdef ENABLE_SQLITE3
     m_db = new SQLiteDatabase();
-    m_db->init();
 #endif
 
     LobbyPlayerQueue::create();
