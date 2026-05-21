@@ -3725,12 +3725,15 @@ bool ServerLobby::handleAssets(const NetworkString& ns,
         updateAddons();
         updateTracksForMode();
     }
-    const PeerEligibility old_el = peer->getEligibility();
-    const PeerEligibility new_el = peer->testEligibility();
-    // eligibility hooks
-    LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_el);
-    if (new_el != old_el)
-        updatePlayerList();
+    if (peer->isValidated())
+    {
+        const PeerEligibility old_el = peer->getEligibility();
+        const PeerEligibility new_el = peer->testEligibility();
+        // eligibility hooks
+        LobbyPlayerQueue::get()->onPeerEligibilityChange(peer, old_el);
+        if (new_el != old_el)
+            updatePlayerList();
+    }
     return true;
 }   // handleAssets
 
@@ -3963,18 +3966,22 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
     auto red_blue = STKHost::get()->getAllPlayersTeamInfo();
     if (ServerConfig::m_server_owner > 0 &&
             online_id == static_cast<uint32_t>(ServerConfig::m_server_owner))
-    {
         permlvl = std::numeric_limits<int>::max();
-    }
     else
-    {
         permlvl = loadPermissionLevelForOID(online_id);
-    }
     peer->setPermissionLevel(permlvl);
     auto restrictions_set_kart = loadRestrictionsForOID(online_id);
     restrictions = std::get<0>(restrictions_set_kart);
     set_kart = std::get<1>(restrictions_set_kart);
     peer->setRestrictions(restrictions);
+
+    std::string utf8_online_name = StringUtils::wideToUtf8(online_name);
+    Log::verbose("ServerLobby", "Peer %d, online id %d (%s): rank %u, restrictions %u",
+            peer->getHostId(),
+            online_id,
+            utf8_online_name.c_str(),
+            peer->getPermissionLevel(),
+            peer->getRestrictions());
 
     for (unsigned i = 0; i < player_count; i++)
     {
@@ -3996,8 +4003,6 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             peer->getHostId(), default_kart_color, i == 0 ? online_id : 0,
             handicap, (uint8_t)i, KART_TEAM_NONE,
             country_code);
-
-        std::string utf8_online_name = StringUtils::wideToUtf8(online_name);
 
         if (!set_kart.empty())
             player->forceKart(set_kart);
@@ -7241,14 +7246,29 @@ bool ServerLobby::checkAllStandardContentInstalled(STKPeer* peer) const
     }
     if (!missing_tracks.empty())
     {
-        std::string msg = "You are missing standard tracks";   
-        msg += "\n\nMissing tracks:\n";
+        std::ostringstream log;
+        bool log_1 = false;
+        std::ostringstream msg_ss;
+        msg_ss << "You are missing standard tracks\n\nMissing tracks:\n";
         for (const auto& track : missing_tracks)
         {
-            msg += "- " + track + "\n";
-            msg += "  Install with: /installaddon " + track + "\n";
+            msg_ss << "- " << track << "\n";
+
+            log << track;
+            if (log_1)
+                log << ", ";
+            else
+                log_1 = true;
         }
+        msg_ss << "Note: It usually happens when your game is outdated. "
+            "Your current version is: " << peer->getUserVersion() << "\nUpdate your game to the newest release, and then rejoin.";
+        std::string msg = msg_ss.str();
         sendStringToPeer(msg, peer);
+        {
+            std::string playername = peer->getCommandContext()->getProfileName();
+            std::string log_2 = log.str();
+            Log::verbose("ServerLobby", "Peer %d (%s) is ineligible: missing tracks (%s)", peer->getHostId(), playername.c_str(), log_2.c_str());
+        }
         return false;
     }   
     return true;
